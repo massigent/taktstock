@@ -1,0 +1,135 @@
+{
+  "director": {
+    "default_model": "gpt-5.6-sol",
+    "escalation_model": "gpt-5.6-sol",
+    "max_fix_attempts": 3,
+    "allow_escalation": true
+  },
+  "agent_policy": {
+    "version": 1,
+    "manager": "sol",
+    "default_session_agents": [
+      "sol",
+      "agy",
+      "luna"
+    ],
+    "roles": {
+      "sol": "Session manager: maximizes outcome with the lowest reasonable token consumption; uses deep reasoning and reviewers only when complexity or risk warrants it.",
+      "agy": "Default executor for operational analysis, filesystem, worktrees, CLI, tests, and local code changes. Does not perform live changes to n8n workflows.",
+      "luna": "Dedicated executor for live n8n workflow changes via the MCP server. Inspects first, applies targeted changes, validates, and reports outcome.",
+      "deepseek_pro": "Independent reviewer: reserved for architectural decisions, migrations, or risks that Sol cannot resolve with direct evidence.",
+      "deepseek_flash": "Cost-effective fixer for focused technical corrections; steps in when AGY encounters logic, backend, or test issues. Does not replace Luna on live n8n.",
+      "glm_flash": "Cost-effective fixer for frontend/UI, CSS, client JavaScript, documentation, and contracts; steps in when AGY fails in these areas. Not a reviewer."
+    },
+    "reviewers": {
+      "automatic_selection_by_sol": true,
+      "default_active": [],
+      "available": [
+        "ds-pro"
+      ]
+    },
+    "execution_priorities": {
+      "local_code": "agy",
+      "n8n_live": "luna",
+      "agy_failure": "contextual_flash_fallback",
+      "rare_specialists": ["ds-pro", "ds-flash", "glm-flash"]
+    },
+    "n8n": {
+      "primary_executor": "luna",
+      "fallback_executor": "ds-flash",
+      "fallback_on_quota_or_rate_limit": true,
+      "prefer_flash_env": "TAKTSTOCK_PREFER_FLASH_FOR_N8N"
+    }
+  },
+  "executor": {
+    "name": "agy",
+    "timeout": "15m",
+    "max_tokens_per_task": 50000
+  },
+  "reviewers": {
+  },
+  "fixers": {
+    "glm_flash": {
+      "enabled": true,
+      "api_key_env": "OPENROUTER_API_KEY",
+      "model": "z-ai/glm-5.3-flash"
+    },
+    "deepseek_pro": {
+      "enabled": true,
+      "profile": "ds-pro",
+      "model": "deepseek-v4-pro"
+    },
+    "deepseek_flash": {
+      "enabled": true,
+      "profile": "ds-flash",
+      "model": "deepseek-v4-flash"
+    }
+  },
+  "presets": {
+    "light": {
+      "director": "sol",
+      "reviewers": [],
+      "allow_escalation": true,
+      "description": "Sol + agy + Luna n8n (essential, reviewers only if Sol requests them)"
+    },
+    "standard": {
+      "director": "sol",
+      "reviewers": [],
+      "allow_escalation": true,
+      "description": "Base session: Sol manages, agy executes, Luna modifies n8n via MCP; selective reviewers decided by Sol"
+    },
+    "critical": {
+      "director": "sol",
+      "reviewers": [
+        "ds-pro"
+      ],
+      "allow_escalation": true,
+      "description": "Sol + agy + Luna; DeepSeek Pro only if Sol requests rare architectural review"
+    },
+    "luna_flash": {
+      "director": "sol",
+      "reviewers": [],
+      "allow_escalation": true,
+      "description": "Sol + Luna n8n via MCP with DeepSeek Flash as cost-effective fallback"
+    },
+    "sol_pro": {
+      "director": "sol",
+      "reviewers": [
+        "ds-pro"
+      ],
+      "allow_escalation": true,
+      "description": "Sol (GPT-5.6 Sol) + DeepSeek Pro + agy (thorough architectural review)"
+    },
+    "quick": {
+      "director": "sol",
+      "reviewers": [],
+      "allow_escalation": false,
+      "description": "Sol (low effort) + agy (quick targeted fixes, bounded budget)"
+    },
+    "mechanical": {
+      "director": "none",
+      "reviewers": [],
+      "allow_escalation": false,
+      "description": "Deterministic/mechanical task (zero LLM for preflight/allowlisted export, zero Sol)"
+    }
+  },
+  "brainstorm": {
+    "enabled": true,
+    "max_rounds": 5,
+    "auto_consult_reviewers": false,
+    "reviewers": [],
+    "require_approval": true
+  },
+  "notifications": {
+    "webhook_url": "http://n8n:5678/webhook/taktstock-progress",
+    "require_approval": false
+  },
+  "storage": {
+    "keep_worktree_on_error": false,
+    "log_format": "jsonl",
+    "sqlite_shadow_write": true,
+    "sqlite_shadow_read": true,
+    "sqlite_run_shadow_write": true,
+    "async_runs": true
+  }
+}

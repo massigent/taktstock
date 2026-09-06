@@ -1,0 +1,8 @@
+# Taktstock Multi-Agent Orchestrator
+# Il core Python utilizza esclusivamente la Standard Library di Python 3 (zero dipendenze obbligatorie).
+
+# Dipendenze opzionali per testing:
+pytest>=7.0.0
+
+# Dipendenze opzionali per Design Mode (cattura screenshot e DOM rendering con Chromium headless):
+playwright>=1.40.0

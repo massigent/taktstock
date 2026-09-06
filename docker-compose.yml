@@ -1,0 +1,42 @@
+services:
+  taktstock:
+    build: .
+    image: taktstock-engine:latest
+    container_name: taktstock-server
+    restart: unless-stopped
+    user: "1000:1000"
+    working_dir: /app/server
+    command: ["python3", "health_server.py"]
+    environment:
+      - TAKTSTOCK_HOME=/app
+      - TAKTSTOCK_HEALTH_PORT=8765
+      - TAKTSTOCK_PROJECTS_DIR=/app/repos
+      - TAKTSTOCK_HOST_CODEX_SIDECAR=1
+      - CODEX_SOCKET_PATH=/run/taktstock-codex/codex.sock
+      - TAKTSTOCK_SIDECAR_TOKEN_FILE=/run/taktstock-codex/token
+      - TAKTSTOCK_HOST_AGY_SIDECAR=1
+      - AGY_SOCKET_PATH=/run/taktstock-agy/agy.sock
+      - TAKTSTOCK_AGY_SIDECAR_TOKEN_FILE=/run/taktstock-agy/token
+      - TAKTSTOCK_HOST_N8N_SIDECAR=1
+      - N8N_SOCKET_PATH=/run/taktstock-n8n/n8n.sock
+    env_file:
+      - .env
+    volumes:
+      # Application directory and workspace
+      - .:/app
+      # Unified runtime directories (socket + token) mounted strictly read-only
+      - /run/user/1000/taktstock-codex:/run/taktstock-codex:ro
+      - /run/user/1000/taktstock-agy:/run/taktstock-agy:ro
+      - /run/user/1000/taktstock-n8n:/run/taktstock-n8n:ro
+    ports:
+      - "127.0.0.1:8765:8765"
+    networks:
+      - taktstock-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+networks:
+  taktstock-network:
+    driver: bridge

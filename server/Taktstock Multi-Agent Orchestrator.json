@@ -1,0 +1,750 @@
+{
+  "name": "Taktstock Multi-Agent Orchestrator",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "id": "052bdb42-0c7c-49fd-a8da-14e5f9ea0064",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        -32,
+        896
+      ],
+      "webhookId": "taktstock-telegram-trigger",
+      "credentials": {
+        "telegramApi": {
+          "id": "0gfAinqdkMbScd06",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extraction of strictly validated commands for POST /api/run\nconst text = ($json.message && $json.message.text) ? $json.message.text.trim() : '';\nconst chatId = ($json.message && $json.message.chat) ? String($json.message.chat.id).trim() : '';\n\n// 1. Default action: CHAT (natural conversation)\nlet action = 'chat';\nlet preset = 'standard';\nlet repo = '';\nlet cleanText = text;\n\n// Explicit action detection\nif (cleanText.startsWith('/task') || cleanText.startsWith('/develop') || cleanText.startsWith('/sviluppa')) {\n  action = 'execute_task';\n  cleanText = cleanText.replace(/^\\/(task|develop|sviluppa)\\s*/i, '').trim();\n} else if (cleanText.startsWith('/brainstorm')) {\n  action = 'brainstorm';\n  preset = 'critical';\n  cleanText = cleanText.replace(/^\\/brainstorm\\s*/i, '').trim();\n} else if (cleanText.startsWith('/approve')) {\n  action = 'approve';\n  cleanText = cleanText.replace(/^\\/approve\\s*/i, '').trim();\n} else if (cleanText.startsWith('/reject')) {\n  action = 'reject';\n  cleanText = cleanText.replace(/^\\/reject\\s*/i, '').trim();\n} else if (cleanText.startsWith('/clear')) {\n  action = 'clear';\n  cleanText = cleanText.replace(/^\\/clear\\s*/i, '').trim();\n} else if (cleanText.startsWith('/chat')) {\n  action = 'chat';\n  cleanText = cleanText.replace(/^\\/chat\\s*/i, '').trim();\n}\n\n// 2. Allowed presets (standard, critical, light, luna_flash)\nif (cleanText.includes('--critical') || cleanText.startsWith('/critical')) {\n  preset = 'critical';\n  cleanText = cleanText.replace('/critical', '').replace('--critical', '');\n} else if (cleanText.includes('--light') || cleanText.startsWith('/light')) {\n  preset = 'light';\n  cleanText = cleanText.replace('/light', '').replace('--light', '');\n} else if (cleanText.includes('--luna_flash') || cleanText.startsWith('/luna_flash')) {\n  preset = 'luna_flash';\n  cleanText = cleanText.replace('/luna_flash', '').replace('--luna_flash', '');\n}\n\n// 3. Repo catalog alias extraction (e.g. repo:myproject)\nconst words = cleanText.split(/\\s+/).filter(Boolean);\nlet taskWords = [];\nfor (const w of words) {\n  if (w.startsWith('repo:')) {\n    repo = w.replace(/^repo:/, '').trim();\n  } else {\n    taskWords.push(w);\n  }\n}\nconst contentText = taskWords.join(' ').trim();\nconst finalText = contentText || text;\n\n// 4. Strict payload construction without legacy fields\nconst payload = {\n  action: action,\n  chat_id: chatId,\n  preset: preset\n};\n\nif (repo) payload.repo = repo;\nif (action === 'chat' || action === 'reject') {\n  payload.message = finalText;\n} else if (action === 'brainstorm' || action === 'execute_task') {\n  payload.task = finalText;\n}\n\nreturn [{\n  payload: payload,\n  ui_text: finalText,\n  is_chat: (action === 'chat')\n}];"
+      },
+      "id": "3f2c08c2-30be-4c5c-9a94-0f709c8ea745",
+      "name": "Parse Command",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is_not_chat_cond",
+              "leftValue": "={{ $json.is_chat }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "e52a1b94-814d-44a1-b8d4-6f01c87e2a9c",
+      "name": "If Is Task/Brainstorm",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.payload.chat_id }}",
+        "text": "=🏢 Taktstock Task Started\n\n⚡ Action: {{ $json.payload.action.toUpperCase() }}\n📋 Details: {{ $json.ui_text }}\n\n⏳ Processing in progress...",
+        "additionalFields": {
+          "parse_mode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "c9021fb1-c67f-4ae6-b920-c1b1d5b09561",
+      "name": "Send Telegram ACK",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        800
+      ],
+      "webhookId": "352ad32d-b6ed-408e-b3bc-2c67ae18ed7a",
+      "credentials": {
+        "telegramApi": {
+          "id": "0gfAinqdkMbScd06",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://taktstock-server:8765/api/run",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Parse Command').item.json.payload) }}",
+        "options": {
+          "timeout": 1800000
+        }
+      },
+      "id": "7fba1c6c-8bda-4295-98f5-afef5aa5618b",
+      "name": "Execute Orchestrator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        864,
+        896
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ils1QMYHWrIGwkyJ",
+          "name": "Taktstock API Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is_queued_status",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "QUEUED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "has_run_id",
+              "leftValue": "={{ !!$json.run_id }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a82c08c2-30be-4c5c-9a94-0f709c8ea748",
+      "name": "If Is Queued",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1088,
+        896
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const json = item.json || {};\n  let chatId = '';\n  let isChat = false;\n  try {\n    const parsed = $('Parse Command').item.json;\n    chatId = (parsed && parsed.payload && parsed.payload.chat_id) ? parsed.payload.chat_id : '';\n    isChat = !!(parsed && parsed.is_chat);\n  } catch (e) {\n    chatId = json.chat_id || '';\n  }\n  results.push({\n    json: {\n      run_id: String(json.run_id || '').trim(),\n      chat_id: String(chatId).trim(),\n      is_chat: isChat,\n      poll_attempt: 0,\n      poll_limit: 180,\n      status: json.status || 'QUEUED'\n    }\n  });\n}\nreturn results;"
+      },
+      "id": "d12c08c2-30be-4c5c-9a94-0f709c8ea749",
+      "name": "Init Poll Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1312,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "amount": 10,
+        "unit": "seconds"
+      },
+      "id": "e22c08c2-30be-4c5c-9a94-0f709c8ea750",
+      "name": "Wait 10s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1536,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "=http://taktstock-server:8765/api/runs/{{ $json.run_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "f32c08c2-30be-4c5c-9a94-0f709c8ea751",
+      "name": "Get Run Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        1024
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "ils1QMYHWrIGwkyJ",
+          "name": "Taktstock API Auth"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\nfor (const item of items) {\n  const json = item.json || {};\n  const runId = json.run_id || '';\n  const status = String(json.status || '').toLowerCase();\n\n  let pollAttempt = 0;\n  let pollLimit = 180;\n  let chatId = '';\n  let isChat = false;\n\n  try {\n    const initCtx = $('Init Poll Context').item.json;\n    pollAttempt = (json.poll_attempt !== undefined) ? json.poll_attempt : ((initCtx && initCtx.poll_attempt !== undefined) ? initCtx.poll_attempt : 0);\n    pollLimit = (json.poll_limit !== undefined) ? json.poll_limit : ((initCtx && initCtx.poll_limit !== undefined) ? initCtx.poll_limit : 180);\n    chatId = json.chat_id || (initCtx && initCtx.chat_id) || '';\n    isChat = (json.is_chat !== undefined) ? json.is_chat : (initCtx ? !!initCtx.is_chat : false);\n  } catch (e) {\n    chatId = json.chat_id || '';\n  }\n\n  if (!runId || json.error) {\n    results.push({\n      json: {\n        route: 'failed',\n        run_id: runId,\n        chat_id: chatId,\n        is_chat: isChat,\n        status: 'ERROR',\n        error: json.error || 'Invalid response from /api/runs'\n      }\n    });\n  } else if (status === 'completed') {\n    results.push({\n      json: {\n        route: 'completed',\n        run_id: runId,\n        chat_id: chatId,\n        is_chat: isChat,\n        status: 'COMPLETED',\n        result: json.result || null,\n        progress: 100\n      }\n    });\n  } else if (status === 'blocked_prerequisite') {\n    const summary = (json.result && json.result.summary) || json.result || {};\n    const blockerReason = json.error || summary.blocker_reason || 'Missing prerequisite for execution';\n    results.push({\n      json: {\n        route: 'failed',\n        run_id: runId,\n        chat_id: chatId,\n        is_chat: isChat,\n        status: 'BLOCKED_PREREQUISITE',\n        error: blockerReason,\n        result: json.result || null\n      }\n    });\n  } else if (status === 'failed' || status === 'error' || status === 'canceled') {\n    results.push({\n      json: {\n        route: 'failed',\n        run_id: runId,\n        chat_id: chatId,\n        is_chat: isChat,\n        status: status.toUpperCase(),\n        error: json.error || 'Execution failed',\n        result: json.result || null\n      }\n    });\n  } else if (pollAttempt >= pollLimit) {\n    results.push({\n      json: {\n        route: 'timeout',\n        run_id: runId,\n        chat_id: chatId,\n        is_chat: isChat,\n        status: 'TIMEOUT',\n        poll_attempt: pollAttempt\n      }\n    });\n  } else {\n    results.push({\n      json: {\n        route: 'continue_polling',\n        run_id: runId,\n        chat_id: chatId,\n        is_chat: isChat,\n        poll_attempt: pollAttempt + 1,\n        poll_limit: pollLimit,\n        status: status,\n        progress: json.progress || 0\n      }\n    });\n  }\n}\nreturn results;"
+      },
+      "id": "a42c08c2-30be-4c5c-9a94-0f709c8ea752",
+      "name": "Evaluate Run State",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1984,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "rules",
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "completed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "completed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "failed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "failed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.route }}",
+                    "rightValue": "continue_polling",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "continue_polling"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra",
+          "renameFallbackOutput": "timeout"
+        }
+      },
+      "id": "b52c08c2-30be-4c5c-9a94-0f709c8ea753",
+      "name": "Switch Run Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2208,
+        1024
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "is_not_chat_success_cond",
+              "leftValue": "={{ $('Parse Command').item.json.is_chat }}",
+              "rightValue": false,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "c18e2c94-814d-44a1-b8d4-6f01c87e2a9d",
+      "name": "If Notify Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1312,
+        800
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Parse Command').item.json.payload.chat_id }}",
+        "text": "={{ (() => { const summary = ($json.result && $json.result.summary) || {}; const subtasks = Array.isArray(summary.subtasks) ? summary.subtasks : []; const parts = ['✅ Task completed', 'Status: ' + ($json.status || 'COMPLETED'), summary.project ? 'Project: ' + summary.project : '', summary.task ? 'Request: ' + String(summary.task).slice(0, 500) : '', ...subtasks.flatMap((task) => [(task.id || 'Task') + ' — ' + (task.description || ''), String(task.outcome || '').slice(0, 1400)]), 'Run: ' + String($json.run_id || '').slice(0, 8)].filter(Boolean); return parts.join('\\n\\n').slice(0, 3900); })() }}",
+        "additionalFields": {
+          "parse_mode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "d4c1de67-978b-4e7d-837f-97bc8d2caf80",
+      "name": "Send Success Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1536,
+        800
+      ],
+      "webhookId": "a23b18e7-6a11-44ab-851b-d5604044acc6",
+      "credentials": {
+        "telegramApi": {
+          "id": "0gfAinqdkMbScd06",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id || $('Parse Command').item.json.payload.chat_id }}",
+        "text": "={{ (() => { const st = $json.status || 'FAILED'; const err = $json.error || ''; if (st === 'BLOCKED_PREREQUISITE') { return '⚠️ Task Blocked (Missing Prerequisite)\\n\\n❌ Cause: ' + err + '\\n\\nRun: ' + String($json.run_id || '').slice(0, 8); } return '⚠️ Taktstock Task Failed\\n\\n❌ Status: ' + st + (err ? '\\n\\nDetails: ' + err : '') + '\\n\\nRun: ' + String($json.run_id || '').slice(0, 8); })() }}",
+        "additionalFields": {
+          "parse_mode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "b18e2c94-814d-44a1-b8d4-6f01c87e2a9e",
+      "name": "Send Failure Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2432,
+        1024
+      ],
+      "webhookId": "b18e2c94-814d-44ab-851b-d5604044acc7",
+      "credentials": {
+        "telegramApi": {
+          "id": "0gfAinqdkMbScd06",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id || $('Parse Command').item.json.payload.chat_id }}",
+        "text": "⏳ Task Still Running\n\nThe task exceeded the maximum wait window (30 min) and is still running in the background.\n\nYou will receive a notification as soon as the process completes.",
+        "additionalFields": {
+          "parse_mode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "f28e2c94-814d-44a1-b8d4-6f01c87e2a9f",
+      "name": "Send Timeout Notification",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2432,
+        1168
+      ],
+      "webhookId": "f28e2c94-814d-44ab-851b-d5604044acc8",
+      "credentials": {
+        "telegramApi": {
+          "id": "0gfAinqdkMbScd06",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "taktstock-progress",
+        "options": {}
+      },
+      "id": "65a6909c-9642-48da-bedf-f35b2aed0fed",
+      "name": "Progress Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -32,
+        1104
+      ],
+      "webhookId": "taktstock-progress"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Estrazione e normalizzazione rigorosa di chat_id e message\nconst raw = $json.body || $json;\nconst rawChatId = (raw.chat_id !== undefined && raw.chat_id !== null) ? raw.chat_id : ((raw.chatId !== undefined && raw.chatId !== null) ? raw.chatId : (raw.data ? (raw.data.chat_id !== undefined ? raw.data.chat_id : raw.data.chatId) : undefined));\nconst message = (raw.message !== undefined && raw.message !== null) ? raw.message : (raw.data && raw.data.message !== undefined ? raw.data.message : '');\nconst event = raw.event || '';\n\n// Filtro eventi tecnici o rumorosi che non devono essere inviati a Telegram\nconst IGNORED_EVENTS = ['token_warning', 'heartbeat', 'ping', 'debug'];\nif (IGNORED_EVENTS.includes(event)) {\n  return [{\n    json: {\n      deliver: false,\n      chat_id: '',\n      message: String(message),\n      reason: 'ignored_technical_event'\n    }\n  }];\n}\n\nlet deliver = false;\nlet chatIdStr = '';\n\nif (rawChatId !== undefined && rawChatId !== null) {\n  const str = String(rawChatId).trim();\n  // Accetta ID Telegram validi: numeri interi positivi o negativi (es: 511090810, -1001234567890)\n  if (/^-?\\d+$/.test(str) && str !== '0') {\n    chatIdStr = str;\n    if (message && typeof message === 'string' && message.trim().length > 0) {\n      deliver = true;\n    }\n  }\n}\n\nif (deliver) {\n  return [{\n    json: {\n      deliver: true,\n      chat_id: chatIdStr,\n      message: String(message)\n    }\n  }];\n} else {\n  return [{\n    json: {\n      deliver: false,\n      chat_id: chatIdStr,\n      message: String(message),\n      reason: !chatIdStr ? 'missing_or_invalid_chat_id' : 'empty_message'\n    }\n  }];\n}"
+      },
+      "id": "b41f8931-15c2-491a-b62a-89a7102e3b5d",
+      "name": "Validate & Format Progress",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        192,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "condition_deliver",
+              "leftValue": "={{ $json.deliver }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "a18e2c94-814d-44a1-b8d4-6f01c87e2a9b",
+      "name": "Filter Deliverable",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        416,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.chat_id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "None",
+          "appendAttribution": false
+        }
+      },
+      "id": "6a1ced28-acd0-4acc-9cf5-8684c25a1efe",
+      "name": "Send Live Progress",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        1024
+      ],
+      "webhookId": "c10b872e-f617-4601-bbd6-811fd6078464",
+      "credentials": {
+        "telegramApi": {
+          "id": "0gfAinqdkMbScd06",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "d89e4c12-32a1-42b7-95ef-1a42b98e1f5c",
+      "name": "Log Dropped Progress",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        640,
+        1184
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Parse Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Command": {
+      "main": [
+        [
+          {
+            "node": "If Is Task/Brainstorm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Is Task/Brainstorm": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram ACK",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Execute Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram ACK": {
+      "main": [
+        [
+          {
+            "node": "Execute Orchestrator",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Orchestrator": {
+      "main": [
+        [
+          {
+            "node": "If Is Queued",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Is Queued": {
+      "main": [
+        [
+          {
+            "node": "Init Poll Context",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "If Notify Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Init Poll Context": {
+      "main": [
+        [
+          {
+            "node": "Wait 10s",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait 10s": {
+      "main": [
+        [
+          {
+            "node": "Get Run Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Run Status": {
+      "main": [
+        [
+          {
+            "node": "Evaluate Run State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate Run State": {
+      "main": [
+        [
+          {
+            "node": "Switch Run Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch Run Status": {
+      "main": [
+        [
+          {
+            "node": "If Notify Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Failure Notification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait 10s",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Timeout Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Notify Success": {
+      "main": [
+        [
+          {
+            "node": "Send Success Notification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Progress Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate & Format Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate & Format Progress": {
+      "main": [
+        [
+          {
+            "node": "Filter Deliverable",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Deliverable": {
+      "main": [
+        [
+          {
+            "node": "Send Live Progress",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log Dropped Progress",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "4a0f0695-72e5-4aac-95fd-949cc87416f3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "af5dc346c433b8e7ccf8c15272272b5511c9c37436eb1b3df45c513d847f7631"
+  },
+  "nodeGroups": [],
+  "id": "zOzkSLhPySImEH5I",
+  "tags": []
+}
