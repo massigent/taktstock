@@ -2,14 +2,14 @@
 """
 Host n8n Socket Client (Hardened Production IPC)
 ------------------------------------------------
-Client per la comunicazione IPC su Unix Domain Socket con il demone
-sidecar host n8n (taktstock-n8n.service).
+Client for Unix Domain Socket IPC communication with the host n8n
+sidecar daemon (taktstock-n8n.service).
 
-Misure di Sicurezza Tassative:
-1. Autenticazione con segreto sidecar letto da file protetto o argomento (File-Only).
-2. Mai loggare o propagare token o credenziali.
-3. Accesso rigorosamente READ-ONLY (list, search, get).
-4. Nessun segreto API n8n viene mai esposto o ricevuto: il client riceve solo il JSON del workflow.
+Mandatory Security Measures:
+1. Authentication with sidecar secret loaded from protected file or argument (File-Only).
+2. Never log or leak tokens or credentials.
+3. Strictly READ-ONLY access (list, search, get).
+4. No n8n API secrets are ever exposed or received: the client only receives workflow JSON.
 """
 
 import os
@@ -43,16 +43,16 @@ MIN_TOKEN_LENGTH = 32
 
 
 class N8nSidecarError(RuntimeError):
-    """Eccezione sollevata quando il sidecar host n8n restituisce un errore."""
+    """Exception raised when host n8n sidecar returns an error."""
     pass
 
 
 def load_client_sidecar_token(explicit_token: Optional[str] = None, token_file: Optional[Path] = None) -> str:
-    """Carica e valida il token del sidecar (File-Only, nessun fallback insicuro)."""
+    """Loads and validates sidecar token (File-Only, no insecure fallback)."""
     if explicit_token and len(explicit_token.strip()) >= MIN_TOKEN_LENGTH:
         return explicit_token.strip()
 
-    # 1. File indicato o default
+    # 1. Specified file or default candidates
     env_file = os.environ.get("TAKTSTOCK_SIDECAR_TOKEN_FILE") or os.environ.get("UFFICIO_SIDECAR_TOKEN_FILE", "")
     candidates = [
         token_file,
@@ -91,7 +91,7 @@ def load_client_sidecar_token(explicit_token: Optional[str] = None, token_file: 
                 pass
 
     raise N8nSidecarError(
-        "Autenticazione sidecar n8n fallita: file segreto TAKTSTOCK_SIDECAR_TOKEN_FILE non trovato o non valido (minimo 32 caratteri)."
+        "n8n sidecar authentication failed (Autenticazione sidecar n8n fallita): secret file TAKTSTOCK_SIDECAR_TOKEN_FILE not found or invalid (minimum 32 characters)."
     )
 
 
@@ -109,11 +109,11 @@ class HostN8nClient:
         self.auth_token = auth_token
 
     def _get_valid_token(self) -> str:
-        """Risolve il token valido o solleva N8nSidecarError."""
+        """Resolves valid token or raises N8nSidecarError."""
         return load_client_sidecar_token(self.auth_token, self.token_file)
 
     def check_ready(self, timeout: float = 2.0) -> bool:
-        """Verifica se il demone sidecar host n8n è attivo e raggiungibile via socket Unix."""
+        """Checks whether the host n8n sidecar daemon is active and reachable via Unix socket."""
         try:
             token = self._get_valid_token()
         except Exception:
@@ -151,11 +151,11 @@ class HostN8nClient:
                     pass
 
     def _send_ipc_request(self, payload: Dict[str, Any], timeout: Optional[int] = None) -> Dict[str, Any]:
-        """Invia una richiesta IPC su Unix Domain Socket."""
+        """Sends an IPC request over Unix Domain Socket."""
         token = self._get_valid_token()
         if not self.socket_path.exists():
             raise N8nSidecarError(
-                f"Socket n8n host non trovato in {self.socket_path}. Verificare che taktstock-n8n.service sia attivo sull'host."
+                f"Host n8n socket not found at {self.socket_path}. Verify that taktstock-n8n.service is active on the host."
             )
 
         full_payload = dict(payload)
@@ -179,27 +179,27 @@ class HostN8nClient:
                 chunks.append(chunk)
                 total_read += len(chunk)
                 if total_read > MAX_RESPONSE_BYTES:
-                    raise N8nSidecarError(f"Risposta socket n8n eccede il limite di {MAX_RESPONSE_BYTES} bytes.")
+                    raise N8nSidecarError(f"n8n socket response exceeds limit of {MAX_RESPONSE_BYTES} bytes.")
                 if b"\n" in chunk:
                     break
 
             resp_raw = b"".join(chunks).decode("utf-8").strip()
             if not resp_raw:
-                raise N8nSidecarError("Risposta vuota ricevuta dal sidecar n8n host.")
+                raise N8nSidecarError("Empty response received from host n8n sidecar.")
 
             resp_data = json.loads(resp_raw)
             if resp_data.get("status") != "ok":
-                err_msg = resp_data.get("error", "Errore sconosciuto dal sidecar n8n")
+                err_msg = resp_data.get("error", "Unknown error from n8n sidecar")
                 raise N8nSidecarError(err_msg)
 
             return resp_data
 
         except socket.timeout:
-            raise N8nSidecarError(f"Timeout IPC ({self.timeout}s) durante la comunicazione con il sidecar n8n host.")
+            raise N8nSidecarError(f"IPC timeout ({self.timeout}s) while communicating with host n8n sidecar.")
         except N8nSidecarError:
             raise
         except Exception as e:
-            raise N8nSidecarError(f"Errore IPC sidecar n8n: {e}")
+            raise N8nSidecarError(f"n8n sidecar IPC error: {e}")
         finally:
             if sock:
                 try:
@@ -208,15 +208,15 @@ class HostN8nClient:
                     pass
 
     def get_workflow_details(self, workflow_id: str, timeout: Optional[int] = None) -> Dict[str, Any]:
-        """Recupera la definizione in sola lettura di un workflow."""
+        """Retrieves read-only definition of a workflow."""
         wf_id = str(workflow_id).strip()
         if not wf_id:
-            raise ValueError("ID workflow obbligatorio.")
+            raise ValueError("Workflow ID mandatory.")
         res = self._send_ipc_request({"action": "get_workflow", "workflow_id": wf_id}, timeout=timeout)
         return res.get("workflow", {})
 
     def search_workflows(self, query: str = "", tags: Optional[List[str]] = None, limit: int = 50, timeout: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Cerca workflow per query o tag."""
+        """Searches workflows by query or tag."""
         res = self._send_ipc_request({
             "action": "search_workflows",
             "query": query,
@@ -226,6 +226,6 @@ class HostN8nClient:
         return res.get("data", [])
 
     def list_workflows(self, limit: int = 100, timeout: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Elenca i workflow live."""
+        """Lists live workflows."""
         res = self._send_ipc_request({"action": "list_workflows", "limit": limit}, timeout=timeout)
         return res.get("workflows", [])

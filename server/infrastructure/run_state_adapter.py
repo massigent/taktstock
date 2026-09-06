@@ -2,17 +2,17 @@
 """
 Run State Adapter for MultiAgentRunner Shadow Persistence
 ---------------------------------------------------------
-Replica in SQLite il ciclo di vita delle run di orchestrazione (running, progress,
-waiting_for_approval, completed, failed) in modalità shadow (osservabilità opzionale).
+Replicates orchestration run lifecycles (running, progress,
+waiting_for_approval, completed, failed) into SQLite in shadow mode (optional observability).
 
-Flag supportato:
+Supported flag:
 - TAKTSTOCK_SQLITE_RUN_SHADOW_WRITE (default 0, fallback UFFICIO_SQLITE_RUN_SHADOW_WRITE)
 
-Principi:
-1. Con flag disattivato, non apre né crea il database SQLite.
-2. I file JSON (checkpoint_*.json, pending_*.json, runs_history.jsonl) restano la fonte autorevole.
-3. Ogni metodo SQLite cattura e logga i propri errori senza mai sollevare eccezioni verso il runner.
-4. Ogni istanza di runner riceve un run_id UUID4 univoco e stabile.
+Principles:
+1. When flag is disabled, neither opens nor creates the SQLite database.
+2. JSON files (checkpoint_*.json, pending_*.json, runs_history.jsonl) remain the single source of truth.
+3. Each SQLite method catches and logs its own errors without ever raising exceptions to the runner.
+4. Each runner instance receives a unique and stable UUID4 run_id.
 """
 
 import os
@@ -30,7 +30,7 @@ logger = logging.getLogger("TaktstockRunShadow")
 
 class RunStateAdapter:
     """
-    Adapter per la persistenza shadow del ciclo di vita delle run orchestrate.
+    Adapter for shadow persistence of orchestrated run lifecycles.
     """
 
     def __init__(
@@ -65,7 +65,7 @@ class RunStateAdapter:
         branch: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Registra l'avvio della run in stato running con progress 0."""
+        """Records run startup in running state with progress 0."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -84,9 +84,9 @@ class RunStateAdapter:
                     run_id=run_id,
                     metadata=meta,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} registrata in stato running.")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} recorded in running state.")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore start_run per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in start_run for {run_id}: {e}")
 
     def update_progress(
         self,
@@ -95,7 +95,7 @@ class RunStateAdapter:
         current_step: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Aggiorna la percentuale di avanzamento e lo step corrente."""
+        """Updates progress percentage and current step."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -109,9 +109,9 @@ class RunStateAdapter:
                     current_step=current_step,
                     metadata=metadata,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} avanzamento {progress}% ({current_step}).")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} progress {progress}% ({current_step}).")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore update_progress per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in update_progress for {run_id}: {e}")
 
     def waiting_approval_run(
         self,
@@ -119,7 +119,7 @@ class RunStateAdapter:
         result: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Aggiorna lo stato a waiting_for_approval con i dati di diff review e workspace."""
+        """Updates status to waiting_for_approval with diff review and workspace data."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -134,9 +134,9 @@ class RunStateAdapter:
                     result=result,
                     metadata=metadata,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} impostata su waiting_for_approval.")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} set to waiting_for_approval.")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore waiting_approval_run per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in waiting_approval_run for {run_id}: {e}")
 
     def complete_run(
         self,
@@ -144,7 +144,7 @@ class RunStateAdapter:
         result: Dict[str, Any],
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Registra il completamento con successo della run."""
+        """Records successful completion of run."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -159,9 +159,9 @@ class RunStateAdapter:
                     result=result,
                     metadata=metadata,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} completata con successo.")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} completed successfully.")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore complete_run per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in complete_run for {run_id}: {e}")
 
     def fail_run(
         self,
@@ -169,7 +169,7 @@ class RunStateAdapter:
         error: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Registra il fallimento della run con errore dettagliato."""
+        """Records run failure with detailed error."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -183,9 +183,9 @@ class RunStateAdapter:
                     error=error,
                     metadata=metadata,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} registrata come fallita: {error}")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} recorded as failed: {error}")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore fail_run per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in fail_run for {run_id}: {e}")
 
     def block_prerequisite_run(
         self,
@@ -194,7 +194,7 @@ class RunStateAdapter:
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Registra il blocco della run per prerequisito mancante."""
+        """Records run blocking due to missing prerequisite."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -210,9 +210,9 @@ class RunStateAdapter:
                     error=error or result.get("blocker_reason"),
                     metadata=metadata,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} registrata come blocked_prerequisite: {error}")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} recorded as blocked_prerequisite: {error}")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore block_prerequisite_run per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in block_prerequisite_run for {run_id}: {e}")
 
     def block_budget_run(
         self,
@@ -221,7 +221,7 @@ class RunStateAdapter:
         error: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Registra il blocco della run per superamento del budget operativo/token/chiamate."""
+        """Records run blocking due to operational/token/call budget exhaustion."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -237,7 +237,7 @@ class RunStateAdapter:
                     error=error or result.get("blocker_reason"),
                     metadata=metadata,
                 )
-                logger.debug(f"[RUN_SHADOW] Run {run_id} registrata come blocked_budget: {error}")
+                logger.debug(f"[RUN_SHADOW] Run {run_id} recorded as blocked_budget: {error}")
         except Exception as e:
-            logger.warning(f"[RUN_SHADOW_ERROR] Errore block_budget_run per {run_id}: {e}")
+            logger.warning(f"[RUN_SHADOW_ERROR] Error in block_budget_run for {run_id}: {e}")
 

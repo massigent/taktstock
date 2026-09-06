@@ -2,13 +2,13 @@
 """
 Host AGY Client (Container-Side Socket Client)
 ---------------------------------------------
-Client Python per la comunicazione sicura tra il container Docker e il sidecar AGY host.
-Caratteristiche:
-- Si connette al socket Unix dedicato (/run/taktstock-agy/agy.sock).
-- Carica il token segreto da file read-only montato nel container (/run/taktstock-agy/token).
-- Fail-Closed: se il file token non esiste, è vuoto o < 32 caratteri, blocca la chiamata senza contattare il socket.
-- Riconosce e gestisce lo stato BUSY (concorrenza a singolo task).
-- Non esegue alcun fallback alla CLI locale o ad account container.
+Python client for secure communication between Docker container and host AGY sidecar.
+Key features:
+- Connects to dedicated Unix socket (/run/taktstock-agy/agy.sock).
+- Loads secret token from read-only file mounted in container (/run/taktstock-agy/token).
+- Fail-Closed: if token file is missing, empty, or < 32 characters, blocks the call without contacting socket.
+- Recognizes and handles BUSY state (single-task concurrency).
+- Performs no fallback to local CLI or container accounts.
 """
 
 import os
@@ -36,17 +36,17 @@ MIN_TOKEN_LENGTH = 32
 
 
 class AgySidecarError(Exception):
-    """Errore durante la comunicazione o esecuzione con il sidecar host AGY."""
+    """Error during communication or execution with host AGY sidecar."""
     pass
 
 
 class AgySidecarBusyError(AgySidecarError):
-    """Il runner host AGY è occupato con un altro task."""
+    """The host AGY runner is busy with another task."""
     pass
 
 
 class AgySidecarTimeoutError(AgySidecarError):
-    """Timeout superato per l'esecuzione di AGY (time budget superato)."""
+    """Timeout exceeded for AGY execution (time budget exceeded)."""
     pass
 
 
@@ -60,28 +60,28 @@ class HostAgyClient:
         self.token_file_path = token_file_path or DEFAULT_TOKEN_FILE_PATH
 
     def _load_token(self) -> str:
-        """Carica il token da file segreto protetto (Fail-Closed)."""
+        """Loads token from protected secret file (Fail-Closed)."""
         if not self.token_file_path.exists():
             raise AgySidecarError(
-                f"File token sidecar AGY non trovato in '{self.token_file_path}'. "
-                "Assicurarsi che il volume del segreto sia montato in sola lettura nel container."
+                f"AGY sidecar token file not found (non trovato) in '{self.token_file_path}'. "
+                "Ensure the secret volume is mounted read-only in the container."
             )
         try:
             token = self.token_file_path.read_text(encoding="utf-8").strip()
         except Exception as e:
-            raise AgySidecarError(f"Impossibile leggere il file token sidecar AGY '{self.token_file_path}': {e}")
+            raise AgySidecarError(f"Unable to read AGY sidecar token file '{self.token_file_path}': {e}")
 
         if len(token) < MIN_TOKEN_LENGTH:
             raise AgySidecarError(
-                f"Token sidecar AGY non valido o troppo debole (lunghezza {len(token)}, minima richiesta {MIN_TOKEN_LENGTH})."
+                f"AGY sidecar token invalid or too weak (troppo debole): length {len(token)}, minimum required {MIN_TOKEN_LENGTH}."
             )
         return token
 
     def check_ready(self, timeout: float = 2.0) -> bool:
         """
-        Verifica se il sidecar host AGY è attivo e raggiungibile via socket Unix.
-        Invia un messaggio di readiness {'auth_token': token, 'action': 'ready'}
-        e valida la risposta.
+        Checks whether the host AGY sidecar is active and reachable via Unix socket.
+        Sends a readiness message {'auth_token': token, 'action': 'ready'}
+        and validates the response.
         """
         if not self.token_file_path.exists() or not os.access(str(self.token_file_path), os.R_OK):
             return False
@@ -123,16 +123,16 @@ class HostAgyClient:
         model: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Invia una richiesta di esecuzione AGY al sidecar host.
-        Ritorna l'intero envelope di risposta strutturato (dict con stdout, usage, code, status, duration_sec, ecc.)
-        o solleva AgySidecarError / AgySidecarBusyError.
+        Sends an AGY execution request to the host sidecar.
+        Returns the full structured response envelope (dict with stdout, usage, code, status, duration_sec, etc.)
+        or raises AgySidecarError / AgySidecarBusyError.
         """
         token = self._load_token()
 
         if not self.socket_path.exists():
             raise AgySidecarError(
-                f"Socket sidecar AGY non disponibile su '{self.socket_path}'. "
-                "Verificare che il demone taktstock-agy sia attivo sull'host e la directory montata."
+                f"AGY sidecar socket not available at '{self.socket_path}'. "
+                "Verify that the taktstock-agy daemon is active on the host and the directory is mounted."
             )
 
         payload = {
@@ -150,7 +150,7 @@ class HostAgyClient:
             client_sock.settimeout(float(timeout + 30))
             client_sock.connect(str(self.socket_path))
         except Exception as e:
-            raise AgySidecarError(f"Connessione al socket sidecar AGY fallita: {e}")
+            raise AgySidecarError(f"Connection to AGY sidecar socket failed: {e}")
 
         try:
             msg = json.dumps(payload, ensure_ascii=False) + "\n"
@@ -165,22 +165,22 @@ class HostAgyClient:
 
             raw_resp = b"".join(response_chunks).decode("utf-8", errors="replace").strip()
             if not raw_resp:
-                raise AgySidecarError("Risposta vuota ricevuta dal socket sidecar AGY.")
+                raise AgySidecarError("Empty response received from AGY sidecar socket.")
 
             try:
                 resp = json.loads(raw_resp)
             except Exception as e:
-                raise AgySidecarError(f"Risposta non valida dal sidecar AGY (JSON non conforme): {raw_resp[:200]}")
+                raise AgySidecarError(f"Invalid response from AGY sidecar (malformed JSON): {raw_resp[:200]}")
 
             status = resp.get("status")
             if status == "BUSY":
-                raise AgySidecarBusyError(resp.get("error", "Il runner host AGY è occupato."))
+                raise AgySidecarBusyError(resp.get("error", "The host AGY runner is currently busy (occupato)."))
 
             if status != "SUCCESS":
-                err_msg = resp.get("stderr") or resp.get("error") or "Errore sconosciuto durante l'esecuzione di AGY."
+                err_msg = resp.get("stderr") or resp.get("error") or "Unknown error during AGY execution."
                 if resp.get("code") == 124 or "timeout" in err_msg.lower():
-                    raise AgySidecarTimeoutError(f"Timeout esecuzione AGY ({timeout}s): {err_msg}")
-                raise AgySidecarError(f"Esecuzione AGY fallita (codice {resp.get('code', 1)}): {err_msg}")
+                    raise AgySidecarTimeoutError(f"AGY execution timeout ({timeout}s): {err_msg}")
+                raise AgySidecarError(f"AGY execution failed (code {resp.get('code', 1)}): {err_msg}")
 
             return resp
 
@@ -189,9 +189,9 @@ class HostAgyClient:
         except AgySidecarError:
             raise
         except socket.timeout:
-            raise AgySidecarTimeoutError(f"Timeout di comunicazione socket con il sidecar AGY ({timeout + 30}s).")
+            raise AgySidecarTimeoutError(f"Socket communication timeout with AGY sidecar ({timeout + 30}s).")
         except Exception as e:
-            raise AgySidecarError(f"Errore IPC con il sidecar host AGY: {e}")
+            raise AgySidecarError(f"IPC error with host AGY sidecar: {e}")
         finally:
             try:
                 client_sock.close()
@@ -207,8 +207,8 @@ class HostAgyClient:
         model: Optional[str] = None
     ) -> str:
         """
-        Invia una richiesta di esecuzione AGY al sidecar host.
-        Ritorna lo stdout dell'agente o solleva AgySidecarError / AgySidecarBusyError.
+        Sends an AGY execution request to the host sidecar.
+        Returns the agent's stdout or raises AgySidecarError / AgySidecarBusyError.
         """
         resp = self.send_request_envelope(
             prompt=prompt,

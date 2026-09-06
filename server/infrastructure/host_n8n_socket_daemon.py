@@ -29,7 +29,7 @@ import urllib.error
 from pathlib import Path
 from typing import Dict, Any, Tuple, Optional, Set
 
-# Setup logging sicuro
+# Setup secure logging
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s][%(levelname)s][HostN8nDaemon] %(message)s"
@@ -67,7 +67,7 @@ FALLBACK_CODEX_CONFIG = _codex_cfg
 
 FALLBACK_LUNA_CONFIG = Path(os.environ.get("TAKTSTOCK_LUNA_CONFIG") or os.environ.get("UFFICIO_LUNA_CONFIG") or (Path.home() / ".codex" / "accounts" / "luna" / "config.toml"))
 
-ALLOWED_CLIENT_UIDS = [1000]  # Solo UID 1000 (taktstock), UID 0 categoricamente vietato
+ALLOWED_CLIENT_UIDS = [1000]  # Only UID 1000 (taktstock), UID 0 categorically forbidden
 MAX_RESPONSE_BYTES = 5 * 1024 * 1024  # 5 MB max payload
 MAX_TIMEOUT_SECONDS = 60
 MIN_TOKEN_LENGTH = 32
@@ -76,11 +76,11 @@ ALLOWED_ACTIONS = {"ready", "health", "get_workflow", "search_workflows", "list_
 
 
 def load_sidecar_token(explicit_token: Optional[str] = None) -> str:
-    """Carica e valida il token del sidecar da argomento, file o configurazione protetta."""
+    """Loads and validates sidecar token from argument, file, or protected configuration."""
     if explicit_token and len(explicit_token.strip()) >= MIN_TOKEN_LENGTH:
         return explicit_token.strip()
 
-    # 1. Variabile d'ambiente
+    # 1. Environment variable
     env_token = (
         os.environ.get("TAKTSTOCK_N8N_SIDECAR_TOKEN", "").strip() or
         os.environ.get("TAKTSTOCK_SIDECAR_TOKEN", "").strip() or
@@ -90,7 +90,7 @@ def load_sidecar_token(explicit_token: Optional[str] = None) -> str:
     if env_token and len(env_token) >= MIN_TOKEN_LENGTH:
         return env_token
 
-    # 2. File segreto runtime
+    # 2. Dedicated runtime secret file
     token_file_path = os.environ.get("TAKTSTOCK_SIDECAR_TOKEN_FILE") or os.environ.get("UFFICIO_SIDECAR_TOKEN_FILE") or str(DEFAULT_TOKEN_FILE)
     token_file_path = token_file_path.strip()
     if token_file_path and Path(token_file_path).exists():
@@ -99,9 +99,9 @@ def load_sidecar_token(explicit_token: Optional[str] = None) -> str:
             if len(file_token) >= MIN_TOKEN_LENGTH:
                 return file_token
         except Exception as e:
-            logger.error(f"Errore lettura file token {token_file_path}: {e}")
+            logger.error(f"Error reading token file {token_file_path}: {e}")
 
-    # 3. File configurazione master host taktstock-n8n
+    # 3. Master configuration file on host taktstock-n8n
     if DEFAULT_MASTER_CONFIG.exists():
         try:
             for line in DEFAULT_MASTER_CONFIG.read_text(encoding="utf-8").splitlines():
@@ -114,7 +114,7 @@ def load_sidecar_token(explicit_token: Optional[str] = None) -> str:
         except Exception:
             pass
 
-    # 4. Fallback file configurazione master host codex
+    # 4. Fallback master configuration file on host codex
     if FALLBACK_CODEX_CONFIG.exists():
         try:
             for line in FALLBACK_CODEX_CONFIG.read_text(encoding="utf-8").splitlines():
@@ -127,16 +127,16 @@ def load_sidecar_token(explicit_token: Optional[str] = None) -> str:
             pass
 
     raise ValueError(
-        f"TAKTSTOCK_SIDECAR_TOKEN non configurato o non valido: è richiesta una chiave di almeno {MIN_TOKEN_LENGTH} caratteri."
+        f"TAKTSTOCK_SIDECAR_TOKEN not configured or invalid (non configurato o non valido): a key of at least {MIN_TOKEN_LENGTH} characters is required."
     )
 
 
 def load_n8n_credentials() -> Tuple[str, str]:
-    """Recupera URL e API Key di n8n in modo sicuro dall'ambiente host o file protetti."""
+    """Retrieves n8n URL and API Key securely from host environment or protected files."""
     api_url = os.environ.get("N8N_API_URL", "").strip()
     api_key = os.environ.get("N8N_API_KEY", "").strip()
 
-    # 1. Lettura da file ufficio-n8n sidecar.env
+    # 1. Read from taktstock-n8n / ufficio-n8n sidecar.env
     if (not api_key or not api_url) and DEFAULT_MASTER_CONFIG.exists():
         try:
             for line in DEFAULT_MASTER_CONFIG.read_text(encoding="utf-8").splitlines():
@@ -148,7 +148,7 @@ def load_n8n_credentials() -> Tuple[str, str]:
         except Exception:
             pass
 
-    # 2. Fallback da configurazione account Luna su host
+    # 2. Fallback from Luna account configuration on host
     if (not api_key or not api_url) and FALLBACK_LUNA_CONFIG.exists():
         try:
             for line in FALLBACK_LUNA_CONFIG.read_text(encoding="utf-8").splitlines():
@@ -167,21 +167,21 @@ def load_n8n_credentials() -> Tuple[str, str]:
 
 
 def get_peer_credentials(sock: socket.socket) -> Optional[Tuple[int, int, int]]:
-    """Recupera PID, UID, GID del processo client tramite SO_PEERCRED (Linux)."""
+    """Retrieves PID, UID, GID of client process via SO_PEERCRED (Linux)."""
     try:
         if hasattr(socket, "SO_PEERCRED"):
             ucred = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
             pid, uid, gid = struct.unpack("3i", ucred)
             return pid, uid, gid
     except Exception as e:
-        logger.warning(f"Impossibile determinare le peer credentials: {e}")
+        logger.warning(f"Unable to determine peer credentials: {e}")
     return None
 
 
 def execute_n8n_readonly_get(api_url: str, api_key: str, endpoint: str, params: Optional[Dict[str, Any]] = None, timeout: int = 15) -> Any:
-    """Esegue una chiamata HTTP GET in sola lettura all'API n8n."""
+    """Executes a read-only HTTP GET request to n8n API."""
     if not api_key:
-        raise RuntimeError("N8N_API_KEY non disponibile sull'host. Impossibile autenticare la richiesta n8n.")
+        raise RuntimeError("N8N_API_KEY not available on host. Cannot authenticate n8n request.")
 
     clean_endpoint = endpoint.lstrip("/")
     url = f"{api_url}/{clean_endpoint}"
@@ -202,7 +202,7 @@ def execute_n8n_readonly_get(api_url: str, api_key: str, endpoint: str, params: 
 
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"API n8n ha risposto con codice HTTP {resp.status}")
+            raise RuntimeError(f"n8n API responded with HTTP status {resp.status}")
         raw_body = resp.read().decode("utf-8")
         return json.loads(raw_body)
 
@@ -226,20 +226,20 @@ class HostN8nSocketDaemon:
         self.lock = threading.Lock()
 
     def handle_request(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        """Elabora ed esegue una richiesta client."""
+        """Processes and executes a client request."""
         if not isinstance(payload, dict):
-            return {"status": "error", "error": "Payload non valido: deve essere un oggetto JSON."}
+            return {"status": "error", "error": "Invalid payload (Payload non valido): must be a JSON object."}
 
-        # 1. Autenticazione timing-safe
+        # 1. Timing-safe authentication
         token = str(payload.get("auth_token", "")).strip()
         if not token or not hmac.compare_digest(token, self.auth_token):
-            return {"status": "error", "error": "Autenticazione socket fallita: token non valido o non autorizzato."}
+            return {"status": "error", "error": "Socket authentication failed (Autenticazione socket fallita): invalid or unauthorized token."}
 
         action = str(payload.get("action", "")).strip().lower()
         if action not in ALLOWED_ACTIONS:
             return {
                 "status": "error",
-                "error": f"Action '{action}' non consentita: il bridge n8n host è rigorosamente read-only (consentite: {', '.join(sorted(ALLOWED_ACTIONS))})."
+                "error": f"Action '{action}' not allowed (non consentita): the host n8n bridge is strictly read-only (allowed: {', '.join(sorted(ALLOWED_ACTIONS))})."
             }
 
         # 2. Readiness check
@@ -255,17 +255,17 @@ class HostN8nSocketDaemon:
         if not self.api_key:
             return {
                 "status": "error",
-                "error": "N8N_API_KEY non configurata o assente sull'host."
+                "error": "N8N_API_KEY not configured on host (N8N_API_KEY non configurata o assente sull'host)."
             }
 
         timeout = min(int(payload.get("timeout", 15)), MAX_TIMEOUT_SECONDS)
 
-        # 3. Azioni read-only
+        # 3. Read-only actions
         try:
             if action == "get_workflow":
                 wf_id = str(payload.get("workflow_id") or payload.get("workflowId") or "").strip()
                 if not wf_id:
-                    return {"status": "error", "error": "Parametro obbligatorio 'workflow_id' mancante."}
+                    return {"status": "error", "error": "Mandatory parameter 'workflow_id' missing."}
                 data = execute_n8n_readonly_get(self.api_url, self.api_key, f"api/v1/workflows/{wf_id}", timeout=timeout)
                 return {"status": "ok", "workflow": data}
 
@@ -313,31 +313,31 @@ class HostN8nSocketDaemon:
 
         except Exception as e:
             err_str = str(e)
-            # Sanificazione stringhe errore: mai esporre segreti
+            # Sanitize error strings: never leak secrets
             if self.api_key:
                 err_str = err_str.replace(self.api_key, "[REDACTED_API_KEY]")
             if self.auth_token:
                 err_str = err_str.replace(self.auth_token, "[REDACTED_TOKEN]")
-            logger.error(f"Errore esecuzione {action}: {err_str}")
-            return {"status": "error", "error": f"Errore chiamata n8n read-only: {err_str}"}
+            logger.error(f"Error executing {action}: {err_str}")
+            return {"status": "error", "error": f"n8n read-only call error (Errore chiamata n8n read-only): {err_str}"}
 
-        return {"status": "error", "error": "Richiesta non gestita."}
+        return {"status": "error", "error": "Unhandled request."}
 
     def _client_thread(self, conn: socket.socket, addr: Any):
         try:
             conn.settimeout(30.0)
 
-            # Verifica UID su Linux se supportato
+            # UID verification on Linux if supported
             peer_cred = get_peer_credentials(conn)
             if peer_cred is not None:
                 _, uid, _ = peer_cred
                 if uid not in ALLOWED_CLIENT_UIDS:
-                    logger.warning(f"Rifiutata connessione da client con UID non autorizzato: {uid}")
-                    err_resp = json.dumps({"status": "error", "error": "Accesso negato: UID client non autorizzato."}) + "\n"
+                    logger.warning(f"Rejected connection from client with unauthorized UID: {uid}")
+                    err_resp = json.dumps({"status": "error", "error": "Access denied: client UID not authorized."}) + "\n"
                     conn.sendall(err_resp.encode("utf-8"))
                     return
 
-            # Lettura payload fino a newline o EOF (max 512 KB)
+            # Read payload up to newline or EOF (max 512 KB)
             data_chunks = []
             total_read = 0
             while True:
@@ -356,21 +356,21 @@ class HostN8nSocketDaemon:
             try:
                 payload = json.loads(raw_req)
             except json.JSONDecodeError:
-                err_resp = json.dumps({"status": "error", "error": "Formato JSON non valido."}) + "\n"
+                err_resp = json.dumps({"status": "error", "error": "Invalid JSON format."}) + "\n"
                 conn.sendall(err_resp.encode("utf-8"))
                 return
 
             response_dict = self.handle_request(payload)
             resp_bytes = (json.dumps(response_dict, ensure_ascii=False) + "\n").encode("utf-8")
             if len(resp_bytes) > MAX_RESPONSE_BYTES:
-                err_resp = json.dumps({"status": "error", "error": "Risposta n8n eccede la dimensione massima consentita."}) + "\n"
+                err_resp = json.dumps({"status": "error", "error": "n8n response exceeds maximum allowed size (dimensione massima consentita)."}) + "\n"
                 conn.sendall(err_resp.encode("utf-8"))
                 return
 
             conn.sendall(resp_bytes)
 
         except Exception as e:
-            logger.error(f"Errore gestione client socket: {e}")
+            logger.error(f"Error handling socket client: {e}")
         finally:
             try:
                 conn.close()
@@ -378,7 +378,7 @@ class HostN8nSocketDaemon:
                 pass
 
     def start(self):
-        """Avvia il demone socket Unix in ascolto."""
+        """Starts the listening Unix Domain Socket daemon."""
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
         if self.socket_path.exists():
             self.socket_path.unlink()
@@ -389,8 +389,8 @@ class HostN8nSocketDaemon:
         self.server_sock.listen(10)
         self.running = True
 
-        logger.info(f"Host n8n Read-Only Daemon in ascolto su Unix Socket: {self.socket_path} (mode 0600)")
-        logger.info(f"Endpoint n8n: {self.api_url} | API Key configurata: {'SI' if self.api_key else 'NO'}")
+        logger.info(f"Host n8n Read-Only Daemon listening on Unix Socket: {self.socket_path} (mode 0600)")
+        logger.info(f"n8n Endpoint: {self.api_url} | API Key configured: {'YES' if self.api_key else 'NO'}")
 
         while self.running:
             try:
@@ -399,11 +399,11 @@ class HostN8nSocketDaemon:
                 t.start()
             except Exception as e:
                 if self.running:
-                    logger.error(f"Errore accept socket: {e}")
+                    logger.error(f"Socket accept error: {e}")
                 break
 
     def stop(self):
-        """Arresta il demone e rimuove il socket."""
+        """Stops the daemon and removes the socket."""
         self.running = False
         if self.server_sock:
             try:
@@ -415,7 +415,7 @@ class HostN8nSocketDaemon:
                 self.socket_path.unlink()
             except Exception:
                 pass
-        logger.info("Host n8n Read-Only Daemon arrestato.")
+        logger.info("Host n8n Read-Only Daemon stopped.")
 
 
 if __name__ == "__main__":

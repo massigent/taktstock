@@ -147,14 +147,14 @@ def get_git_info(project_dir: Path) -> Dict[str, Any]:
     branch = "main"
     remote = ""
     try:
-        # Leggi branch corrente da .git/HEAD
+        # Read current branch from .git/HEAD
         head_file = git_dir / "HEAD"
         if head_file.exists():
             head_content = head_file.read_text(encoding="utf-8", errors="ignore").strip()
             if head_content.startswith("ref: refs/heads/"):
                 branch = head_content.replace("ref: refs/heads/", "")
                 
-        # Leggi remote url da .git/config
+        # Read remote url from .git/config
         config_file = git_dir / "config"
         if config_file.exists():
             conf_lines = config_file.read_text(encoding="utf-8", errors="ignore").splitlines()
@@ -165,7 +165,7 @@ def get_git_info(project_dir: Path) -> Dict[str, Any]:
                             remote = sub.split("=", 1)[1].strip()
                             break
     except Exception as e:
-        logger.debug(f"Errore lettura git info per {project_dir}: {e}")
+        logger.debug(f"Error reading git info for {project_dir}: {e}")
         
     return {"is_git": True, "branch": branch, "remote": remote}
 
@@ -174,7 +174,7 @@ class ProjectsManager:
         self.base_dir = base_dir or get_base_progetti_dir()
 
     def list_projects(self) -> List[Dict[str, Any]]:
-        """Scansiona e restituisce tutti i progetti disponibili raggruppando symlink e alias."""
+        """Scans and returns all available projects, grouping symlinks and aliases."""
         if not self.base_dir.exists():
             return []
             
@@ -199,7 +199,7 @@ class ProjectsManager:
                     desc = extract_project_description(item)
                     git_info = get_git_info(item)
                     
-                    # File principali top-level
+                    # Key top-level files
                     key_files = sorted([f for f in files if f not in IGNORED_FILES])[:15]
                     
                     projects_by_real_path[real_str] = {
@@ -214,7 +214,7 @@ class ProjectsManager:
                         "key_files": key_files,
                     }
                     
-        # Collega symlink come alias
+        # Connect symlinks as aliases
         for real_str, sym_aliases in aliases_map.items():
             if real_str in projects_by_real_path:
                 for a in sym_aliases:
@@ -226,29 +226,29 @@ class ProjectsManager:
         return result
 
     def find_project(self, query: str) -> Optional[Dict[str, Any]]:
-        """Trova un progetto per nome esatto, alias, o corrispondenza parziale."""
+        """Finds a project by exact name, alias, or partial match."""
         if not query:
             return None
             
         clean_q = query.strip().lower()
-        # Rimuovi prefissi comuni come 'repo:', 'progetto:', ecc.
-        clean_q = clean_q.replace("repo:", "").replace("progetto:", "").strip()
+        # Remove common prefixes like 'repo:', 'project:', 'progetto:', etc.
+        clean_q = clean_q.replace("repo:", "").replace("project:", "").replace("progetto:", "").strip()
         if clean_q.startswith("/"):
             clean_q = Path(clean_q).name.lower()
             
         projects = self.list_projects()
         
-        # 1. Corrispondenza esatta su nome o alias
+        # 1. Exact match on name or alias
         for p in projects:
             if p["name"].lower() == clean_q or clean_q in [a.lower() for a in p.get("aliases", [])]:
                 return p
                 
-        # 2. Corrispondenza su prefisso
+        # 2. Prefix match
         for p in projects:
             if p["name"].lower().startswith(clean_q):
                 return p
                 
-        # 3. Corrispondenza come sottostringa
+        # 3. Substring match
         for p in projects:
             if clean_q in p["name"].lower() or any(clean_q in a.lower() for a in p.get("aliases", [])):
                 return p

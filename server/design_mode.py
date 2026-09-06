@@ -63,20 +63,20 @@ class DesignCapture:
         clean_url_name = url.replace("https://", "").replace("http://", "").replace("/", "_").replace(":", "_")
         screenshot_path = self.output_dir / f"screen_{timestamp_str}_{clean_url_name[:30]}.png"
 
-        # Prova ad utilizzare Playwright
+        # Attempt to use Playwright
         try:
             from playwright.sync_api import sync_playwright
-            logger.info(f"Design Mode (Playwright): Navigazione su {url}...")
+            logger.info(f"Design Mode (Playwright): Navigating to {url}...")
             with sync_playwright() as p:
                 browser = p.chromium.launch(headless=True)
                 page = browser.new_page(viewport={"width": viewport_width, "height": viewport_height})
 
-                # Protezione SSRF a livello di routing / redirect per tutte le richieste
+                # SSRF protection at routing / redirect level for all requests
                 def handle_route(route):
                     req_url = route.request.url
                     safe, _ = validate_safe_url(req_url)
                     if not safe:
-                        logger.warning(f"Playwright route bloccata per motivi SSRF: {req_url}")
+                        logger.warning(f"Playwright route blocked for SSRF reasons: {req_url}")
                         route.abort()
                     else:
                         route.continue_()
@@ -123,7 +123,7 @@ class DesignCapture:
                 title = page.title()
                 browser.close()
 
-                logger.info(f"Screenshot salvato in {screenshot_path}")
+                logger.info(f"Screenshot saved to {screenshot_path}")
                 return {
                     "url": url,
                     "title": title,
@@ -137,9 +137,9 @@ class DesignCapture:
 
         except ImportError:
             logger.warning(
-                "Playwright non installato. Per screenshot reali esegui: pip install playwright && playwright install chromium"
+                "Playwright is not installed. For real screenshots run: pip install playwright && playwright install chromium"
             )
-            # Fallback HTTP standard (recupera solo HTML testuale)
+            # Standard HTTP fallback (retrieves textual HTML only)
             return self._fallback_fetch_html(url, selector)
         except Exception as e:
             logger.error(f"Error during Playwright capture: {e}")

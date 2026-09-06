@@ -2,18 +2,18 @@
 """
 Brainstorm State Adapter for Shadow Persistence
 ------------------------------------------------
-Gestisce la shadow persistence (lettura e scrittura ombra) in SQLite per BrainstormManager,
-mantenendo i file JSON come unica fonte autorevole della verità.
+Manages shadow persistence (shadow read and write) in SQLite for BrainstormManager,
+maintaining JSON files as the single source of truth.
 
-Flag supportati:
+Supported flags:
 - TAKTSTOCK_SQLITE_SHADOW_WRITE (default 0, fallback UFFICIO_SQLITE_SHADOW_WRITE)
 - TAKTSTOCK_SQLITE_SHADOW_READ (default 0, fallback UFFICIO_SQLITE_SHADOW_READ)
 
-Principi:
-1. Il JSON viene sempre scritto e letto per primo.
-2. Shadow write: replica la sessione e i messaggi in SQLite senza mai bloccare o alterare il flusso JSON in caso di errore.
-3. Shadow read: confronta semanticamente i dati JSON con SQLite e registra eventuali divergenze, restituendo sempre il JSON.
-4. Con flag disattivati, non apre né crea il database SQLite.
+Principles:
+1. JSON is always written and read first.
+2. Shadow write: replicates session and messages in SQLite without blocking or altering JSON flow on error.
+3. Shadow read: semantically compares JSON data with SQLite and records divergences, always returning JSON.
+4. When flags are disabled, neither opens nor creates the SQLite database.
 """
 
 import os
@@ -36,22 +36,22 @@ def _is_flag_enabled(
     fallback_env: Optional[str] = None
 ) -> bool:
     """
-    Verifica se un feature flag è abilitato rispettando la precedenza:
-    1. Parametro esplicito (se non None)
-    2. Variabile d'ambiente (se presente in os.environ)
-    3. Variabile fallback / mappatura automatica TAKTSTOCK_ <-> UFFICIO_
-    4. Sezione 'storage' in config.json
+    Checks whether a feature flag is enabled respecting precedence:
+    1. Explicit parameter (if not None)
+    2. Environment variable (if present in os.environ)
+    3. Fallback variable / automatic mapping TAKTSTOCK_ <-> UFFICIO_
+    4. Storage section in config.json
     5. Fallback fail-closed: False
     """
     if explicit_val is not None:
         return bool(explicit_val)
 
-    # 1. Variabile d'ambiente esplicita
+    # 1. Explicit environment variable
     if flag_name in os.environ:
         val = os.environ[flag_name].strip().lower()
         return val in ("1", "true", "yes", "on")
 
-    # 1b. Fallback env o cross-mapping
+    # 1b. Fallback env or cross-mapping
     if fallback_env and fallback_env in os.environ:
         val = os.environ[fallback_env].strip().lower()
         return val in ("1", "true", "yes", "on")
@@ -67,7 +67,7 @@ def _is_flag_enabled(
             val = os.environ[modern].strip().lower()
             return val in ("1", "true", "yes", "on")
 
-    # 2. Fallback su config.json
+    # 2. Fallback to config.json
     target_key = flag_name.lower().replace("taktstock_", "").replace("ufficio_", "")
     candidate_paths: List[Path] = []
     if config_path is not None:
@@ -111,7 +111,7 @@ def _is_flag_enabled(
 
 class BrainstormStateAdapter:
     """
-    Adapter per shadow persistence in SQLite delle sessioni di brainstorming.
+    Adapter for shadow persistence in SQLite of brainstorming sessions.
     """
 
     def __init__(
@@ -128,7 +128,7 @@ class BrainstormStateAdapter:
         self._session_repo: Optional[SessionRepository] = None
         self.last_diffs: List[str] = []
 
-        # Inizializza DatabaseManager solo se almeno una shadow feature è attiva o db_manager è stato iniettato
+        # Initialize DatabaseManager only if at least one shadow feature is active or db_manager was injected
         if self._db_manager is None and (self.shadow_write or self.shadow_read):
             self._db_manager = DatabaseManager()
 
@@ -143,8 +143,8 @@ class BrainstormStateAdapter:
 
     def shadow_save(self, data: Dict[str, Any]) -> None:
         """
-        Replica in SQLite la sessione e i messaggi dopo un salvataggio JSON riuscito.
-        Non solleva mai eccezioni verso il chiamante.
+        Replicates session and messages to SQLite after a successful JSON save.
+        Never raises exceptions to the caller.
         """
         if not self.shadow_write or not self._db_manager or not isinstance(data, dict):
             return
@@ -160,13 +160,13 @@ class BrainstormStateAdapter:
             created_at = data.get("created_at") or utc_now_iso()
             updated_at = data.get("updated_at") or created_at
 
-            # Preserva metadati non mappati
+            # Preserve unmapped metadata
             reserved_keys = {"id", "chat_id", "title", "status", "created_at", "updated_at", "messages"}
             metadata = {k: v for k, v in data.items() if k not in reserved_keys}
             messages_raw = data.get("messages", [])
 
             with self._db_manager.transaction() as conn:
-                # Upsert sessione
+                # Upsert session
                 conn.execute(
                     """
                     INSERT INTO sessions (id, chat_id, title, status, metadata, created_at, updated_at)
@@ -181,7 +181,7 @@ class BrainstormStateAdapter:
                     (session_id, chat_id, title, status, json.dumps(metadata), created_at, updated_at),
                 )
 
-                # Upsert messaggi
+                # Upsert messages
                 for idx, msg in enumerate(messages_raw):
                     if not isinstance(msg, dict):
                         continue
@@ -210,13 +210,13 @@ class BrainstormStateAdapter:
                         (mid, session_id, role, author, content, json.dumps(m_meta), m_created),
                     )
 
-            logger.debug(f"[SHADOW_WRITE] Sessione {session_id} e {len(messages_raw)} messaggi replicati in SQLite.")
+            logger.debug(f"[SHADOW_WRITE] Session {session_id} and {len(messages_raw)} messages replicated to SQLite.")
 
         except Exception as e:
-            logger.warning(f"[SHADOW_WRITE_ERROR] Errore replica SQLite per sessione {session_id}: {e}")
+            logger.warning(f"[SHADOW_WRITE_ERROR] SQLite replication error for session {session_id}: {e}")
 
     def shadow_set_active(self, chat_id: str, brainstorm_id: str) -> None:
-        """Aggiorna lo stato della sessione attiva in SQLite se abilitato."""
+        """Updates active session status in SQLite if enabled."""
         if not self.shadow_write or not self._db_manager:
             return
 
@@ -227,14 +227,14 @@ class BrainstormStateAdapter:
                     (utc_now_iso(), brainstorm_id),
                 )
         except Exception as e:
-            logger.warning(f"[SHADOW_SET_ACTIVE_ERROR] Errore aggiornamento active session in SQLite {brainstorm_id}: {e}")
+            logger.warning(f"[SHADOW_SET_ACTIVE_ERROR] Error updating active session in SQLite {brainstorm_id}: {e}")
 
     def shadow_compare(self, session_id: str, json_data: Dict[str, Any]) -> List[str]:
         """
-        Confronta semanticamente i dati JSON con i dati presenti in SQLite.
-        Registra eventuali divergenze su status, chat_id, title, preset, final_plan,
-        e messaggi (content, author, role, count).
-        Restituisce la lista delle differenze. Non solleva mai eccezioni.
+        Semantically compares JSON data with data present in SQLite.
+        Records divergences on status, chat_id, title, preset, final_plan,
+        and messages (content, author, role, count).
+        Returns list of differences. Never raises exceptions.
         """
         self.last_diffs = []
         if not self.shadow_read or not self._db_manager or not isinstance(json_data, dict):
@@ -247,32 +247,32 @@ class BrainstormStateAdapter:
 
             sql_data = repo.get_session(session_id, include_messages=True)
             if sql_data is None:
-                diff = f"Sessione {session_id} presente nel JSON ma assente in SQLite"
+                diff = f"Session {session_id} present in JSON but missing in SQLite (presente nel JSON ma assente in SQLite)"
                 self.last_diffs.append(diff)
-                logger.warning(f"[SHADOW_DIFF] Divergenza per sessione {session_id}: {diff}")
+                logger.warning(f"[SHADOW_DIFF] Divergence for session {session_id}: {diff}")
                 return self.last_diffs
 
             diffs: List[str] = []
 
-            # 1. Confronto status (normalizzato, senza presupporre entrambi truthy)
+            # 1. Status comparison (normalized)
             j_status = str(json_data.get("status") or "")
             s_status = str(sql_data.get("status") or "")
             if j_status != s_status:
                 diffs.append(f"status mismatch: json='{j_status}' vs sqlite='{s_status}'")
 
-            # 2. Confronto chat_id
+            # 2. chat_id comparison
             j_chat = str(json_data.get("chat_id") or "")
             s_chat = str(sql_data.get("chat_id") or "")
             if j_chat != s_chat:
                 diffs.append(f"chat_id mismatch: json='{j_chat}' vs sqlite='{s_chat}'")
 
-            # 3. Confronto titolo / task
+            # 3. Title / task comparison
             j_title = str(json_data.get("task") or json_data.get("title") or "")
             s_title = str(sql_data.get("title") or "")
             if j_title != s_title:
                 diffs.append(f"title mismatch: json='{j_title}' vs sqlite='{s_title}'")
 
-            # 4. Confronto metadata essenziali (preset, final_plan)
+            # 4. Essential metadata comparison (preset, final_plan)
             j_preset = str(json_data.get("preset") or "")
             s_preset = str((sql_data.get("metadata") or {}).get("preset") or "")
             if j_preset != s_preset:
@@ -283,7 +283,7 @@ class BrainstormStateAdapter:
             if j_plan != s_plan:
                 diffs.append(f"final_plan mismatch: json='{j_plan}' vs sqlite='{s_plan}'")
 
-            # 5. Confronto messaggi (conteggio, testo, autore, ruolo)
+            # 5. Messages comparison (count, text, author, role)
             j_msgs = json_data.get("messages", [])
             s_msgs = sql_data.get("messages", [])
             if len(j_msgs) != len(s_msgs):
@@ -307,10 +307,10 @@ class BrainstormStateAdapter:
 
             if diffs:
                 self.last_diffs = diffs
-                logger.warning(f"[SHADOW_DIFF] Divergenze rilevate per sessione {session_id}: {diffs}")
+                logger.warning(f"[SHADOW_DIFF] Divergences detected for session {session_id}: {diffs}")
 
             return diffs
 
         except Exception as e:
-            logger.warning(f"[SHADOW_READ_ERROR] Errore durante confronto shadow read per {session_id}: {e}")
+            logger.warning(f"[SHADOW_READ_ERROR] Error during shadow read comparison for {session_id}: {e}")
             return []

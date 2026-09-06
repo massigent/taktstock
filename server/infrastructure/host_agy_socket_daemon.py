@@ -35,7 +35,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("AgyHostDaemon")
 
-# Configurazioni di Sicurezza e Default
+# Security Configurations and Defaults
 DEFAULT_SOCKET_PATH = Path(os.environ.get("AGY_SOCKET_PATH") or os.environ.get("TAKTSTOCK_AGY_SOCKET_PATH") or "/run/taktstock-agy/agy.sock")
 DEFAULT_TOKEN_FILE = Path(os.environ.get("TAKTSTOCK_AGY_SIDECAR_TOKEN_FILE") or os.environ.get("UFFICIO_AGY_SIDECAR_TOKEN_FILE") or "/run/taktstock-agy/token")
 _default_config = Path(os.environ.get("TAKTSTOCK_AGY_CONFIG") or os.environ.get("UFFICIO_AGY_CONFIG") or (Path.home() / ".config" / "taktstock-agy" / "sidecar.env"))
@@ -53,10 +53,10 @@ DEFAULT_WORKTREE_ROOTS = [
 ALLOWED_SANDBOX_MODES: Set[str] = {"read-only", "workspace-write"}
 ALLOWED_CLIENT_UIDS: Set[int] = {1000}
 MIN_TOKEN_LENGTH: int = 32
-MAX_OUTPUT_BYTES: int = 512 * 1024       # 512 KB per prevenire DoS di memoria
-MAX_TIMEOUT_SECONDS: int = 1800          # 30 minuti massimo
+MAX_OUTPUT_BYTES: int = 512 * 1024       # 512 KB to prevent memory DoS
+MAX_TIMEOUT_SECONDS: int = 1800          # 30 minutes maximum
 
-# Allowlist rigorosa per l'ambiente del processo figlio AGY
+# Strict allowlist for AGY child process environment
 CHILD_ENV_ALLOWLIST: Set[str] = {
     "PATH",
     "HOME",
@@ -72,16 +72,16 @@ CHILD_ENV_ALLOWLIST: Set[str] = {
 
 
 def load_agy_sidecar_token(explicit_token: Optional[str] = None) -> str:
-    """Carica e valida il token del sidecar AGY da argomento, file o master config."""
+    """Loads and validates the AGY sidecar token from argument, file, or master config."""
     if explicit_token and len(explicit_token.strip()) >= MIN_TOKEN_LENGTH:
         return explicit_token.strip()
 
-    # 1. Tentativo da variabile d'ambiente
+    # 1. Attempt from environment variable
     env_token = (os.environ.get("TAKTSTOCK_AGY_SIDECAR_TOKEN") or os.environ.get("UFFICIO_AGY_SIDECAR_TOKEN") or "").strip()
     if env_token and len(env_token) >= MIN_TOKEN_LENGTH:
         return env_token
 
-    # 2. Tentativo da file di secret dedicato (runtime)
+    # 2. Attempt from dedicated runtime secret file
     token_file_path = (os.environ.get("TAKTSTOCK_AGY_SIDECAR_TOKEN_FILE") or os.environ.get("UFFICIO_AGY_SIDECAR_TOKEN_FILE") or str(DEFAULT_TOKEN_FILE)).strip()
     if token_file_path and Path(token_file_path).exists():
         try:
@@ -89,9 +89,9 @@ def load_agy_sidecar_token(explicit_token: Optional[str] = None) -> str:
             if len(file_token) >= MIN_TOKEN_LENGTH:
                 return file_token
         except Exception as e:
-            logger.error(f"Errore lettura file token {token_file_path}: {e}")
+            logger.error(f"Error reading token file {token_file_path}: {e}")
 
-    # 3. Tentativo da unica sorgente master persistente di configurazione protetta
+    # 3. Attempt from persistent master protected configuration
     if DEFAULT_MASTER_CONFIG.exists():
         try:
             for line in DEFAULT_MASTER_CONFIG.read_text(encoding="utf-8").splitlines():
@@ -104,20 +104,20 @@ def load_agy_sidecar_token(explicit_token: Optional[str] = None) -> str:
             pass
 
     raise ValueError(
-        f"TAKTSTOCK_AGY_SIDECAR_TOKEN non configurato o non valido: è richiesta una chiave di almeno {MIN_TOKEN_LENGTH} caratteri. "
-        "Configurare TAKTSTOCK_AGY_SIDECAR_TOKEN o TAKTSTOCK_AGY_SIDECAR_TOKEN_FILE prima di avviare il demone AGY."
+        f"TAKTSTOCK_AGY_SIDECAR_TOKEN not configured or invalid (non configurato o non valido): a key of at least {MIN_TOKEN_LENGTH} characters is required. "
+        "Configure TAKTSTOCK_AGY_SIDECAR_TOKEN or TAKTSTOCK_AGY_SIDECAR_TOKEN_FILE before starting the AGY daemon."
     )
 
 
 def get_peer_credentials(sock: socket.socket) -> Optional[Tuple[int, int, int]]:
-    """Recupera PID, UID, GID del processo client tramite SO_PEERCRED (Linux)."""
+    """Retrieves PID, UID, GID of client process via SO_PEERCRED (Linux)."""
     try:
         if hasattr(socket, "SO_PEERCRED"):
             ucred = sock.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
             pid, uid, gid = struct.unpack("3i", ucred)
             return pid, uid, gid
     except Exception as e:
-        logger.warning(f"Impossibile determinare le peer credentials: {e}")
+        logger.warning(f"Unable to determine peer credentials: {e}")
     return None
 
 
@@ -126,43 +126,43 @@ def validate_agy_request(
     expected_token: str,
     allowed_roots: Optional[List[Path]] = None
 ) -> Tuple[bool, str, Dict[str, Any]]:
-    """Valida rigorosamente il payload in ingresso per il sidecar AGY."""
+    """Strictly validates the incoming payload for the AGY sidecar."""
     if not isinstance(payload, dict):
-        return False, "Payload non valido: deve essere un oggetto JSON.", {}
+        return False, "Invalid payload (Payload non valido): must be a JSON object.", {}
 
-    # 1. Autenticazione con segreto dedicato AGY (timing-safe)
+    # 1. Authentication with dedicated AGY secret (timing-safe)
     auth_token = str(payload.get("auth_token", "")).strip()
     if not auth_token or not hmac.compare_digest(auth_token, expected_token):
-        return False, "Autenticazione socket fallita: token AGY non valido o non autorizzato.", {}
+        return False, "Socket authentication failed (Autenticazione socket fallita): invalid or unauthorized AGY token.", {}
 
-    # 1b. Operazione rapida di readiness/health check (zero esecuzione agy)
+    # 1b. Fast readiness/health check operation (zero agy execution)
     action = str(payload.get("action", "")).strip().lower()
     if action in ["ready", "health"]:
         return True, "", {"action": "ready"}
 
-    # 2. Validazione worktree (Anti-Path Traversal con risoluzione canonica)
+    # 2. Worktree validation (Anti-Path Traversal with canonical resolution)
     worktree_raw = str(payload.get("worktree", "")).strip()
     if not worktree_raw:
-        return False, "Campo 'worktree' obbligatorio per l'esecuzione di agy.", {}
+        return False, "Field 'worktree' required for agy execution (Campo 'worktree' obbligatorio).", {}
 
     worktree_path = Path(worktree_raw).resolve()
     if not worktree_path.exists() or not worktree_path.is_dir():
-        return False, f"Directory worktree non trovata: {worktree_raw}", {}
+        return False, f"Worktree directory not found (Directory worktree non trovata): {worktree_raw}", {}
 
     roots = [r.resolve() for r in (allowed_roots or DEFAULT_WORKTREE_ROOTS)]
 
-    # Rifiuta la root stessa: deve essere una sottodirectory reale
+    # Reject the root itself: must be a real subdirectory
     if any(worktree_path == root for root in roots):
-        return False, f"Accesso negato: il percorso '{worktree_raw}' è una directory radice. È richiesta una sottodirectory valida sotto worktrees/ o workspaces/.", {}
+        return False, f"Access denied (Accesso negato): path '{worktree_raw}' is a root directory (directory radice). A valid subdirectory under worktrees/ or workspaces/ is required.", {}
 
     is_safe_child = any(root in worktree_path.parents for root in roots)
     if not is_safe_child:
-        return False, f"Accesso negato al percorso '{worktree_raw}': fuori dai worktree autorizzati per AGY.", {}
+        return False, f"Access denied to path '{worktree_raw}': outside authorized worktrees for AGY (fuori dai worktree autorizzati per AGY).", {}
 
     # 3. Sandbox Mode
     sandbox = str(payload.get("sandbox", "workspace-write")).strip().lower()
     if sandbox not in ALLOWED_SANDBOX_MODES:
-        return False, f"Sandbox mode '{sandbox}' non valido per AGY. Validi: {sorted(list(ALLOWED_SANDBOX_MODES))}", {}
+        return False, f"Invalid sandbox mode '{sandbox}' for AGY (Sandbox mode non valido). Valid: {sorted(list(ALLOWED_SANDBOX_MODES))}", {}
 
     # 4. Timeout
     try:
@@ -175,9 +175,9 @@ def validate_agy_request(
     # 5. Prompt
     prompt = payload.get("prompt", "")
     if not isinstance(prompt, str) or not prompt.strip():
-        return False, "Campo 'prompt' obbligatorio e non vuoto per l'esecuzione di agy.", {}
+        return False, "Field 'prompt' required and non-empty for agy execution (Campo 'prompt' obbligatorio).", {}
 
-    # 6. Model (opzionale)
+    # 6. Model (optional)
     model = payload.get("model")
     if model is not None:
         model = str(model).strip()
@@ -196,7 +196,7 @@ def validate_agy_request(
 
 
 def resolve_agy_bin(explicit_bin: Optional[str] = None) -> str:
-    """Risolve e valida il percorso del binario AGY da parametro, variabile o master config."""
+    """Resolves and validates the AGY binary path from parameter, variable, or master config."""
     bin_path = explicit_bin or os.environ.get("AGY_BIN")
     if not bin_path and DEFAULT_MASTER_CONFIG.exists():
         try:
@@ -210,19 +210,19 @@ def resolve_agy_bin(explicit_bin: Optional[str] = None) -> str:
 
     if not bin_path:
         raise ValueError(
-            "AGY_BIN non configurato: specificare il percorso del binario AGY tramite variabile AGY_BIN o nel file "
+            "AGY_BIN not configured: specify the AGY binary path via AGY_BIN environment variable or in file "
             f"'{DEFAULT_MASTER_CONFIG}'."
         )
 
     p = Path(bin_path).resolve()
-    # Se il percorso non esiste o non è eseguibile, fallisce all'avvio (fail-closed)
+    # If the path does not exist or is not executable, fail on startup (fail-closed)
     if not p.exists() or not os.access(str(p), os.X_OK):
-        raise ValueError(f"Binario AGY '{bin_path}' non trovato o non eseguibile.")
+        raise ValueError(f"AGY binary '{bin_path}' not found or not executable (non trovato o non eseguibile).")
     return str(p)
 
 
 def resolve_agy_home(explicit_home: Optional[str] = None) -> Path:
-    """Risolve la home directory isolata dedicata per AGY."""
+    """Resolves the dedicated isolated home directory for AGY."""
     home_path = explicit_home or os.environ.get("AGY_HOME")
     if not home_path and DEFAULT_MASTER_CONFIG.exists():
         try:
@@ -259,7 +259,7 @@ class HostAgyDaemon:
         self.running = False
 
     def audit_log(self, event: str, details: Dict[str, Any]):
-        """Registra eventi di audit in modo sicuro senza includere il prompt per esteso o token."""
+        """Safely logs audit events without including full prompt or tokens."""
         entry = {
             "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "service": "host_agy_daemon",
@@ -269,13 +269,13 @@ class HostAgyDaemon:
         logger.info(f"[AUDIT] {json.dumps(entry)}")
 
     def build_child_env(self) -> Dict[str, str]:
-        """Costruisce un ambiente per il processo figlio basato esclusivamente su STRICT ALLOWLIST e AGY_HOME."""
+        """Builds child process environment based exclusively on STRICT ALLOWLIST and AGY_HOME."""
         env = {}
         for k, v in os.environ.items():
             if k in CHILD_ENV_ALLOWLIST:
                 env[k] = v
 
-        # Imposta default sicuri confinati su AGY_HOME
+        # Set safe defaults confined to AGY_HOME
         current_user = os.environ.get("USER") or Path.home().name or "taktstock"
         env["USER"] = current_user
         env["LOGNAME"] = current_user
@@ -285,7 +285,7 @@ class HostAgyDaemon:
         return env
 
     def execute_agy(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Esegue Antigravity CLI (agy) isolato sul worktree host autorizzato con sandbox deterministico."""
+        """Executes isolated Antigravity CLI (agy) on authorized host worktree with deterministic sandbox."""
         prompt = params["prompt"]
         worktree = params["worktree"]
         sandbox = params["sandbox"]
@@ -295,17 +295,15 @@ class HostAgyDaemon:
         start_time = time.time()
         prompt_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16]
 
-        # Costruzione comando agy con sandbox e mode obbligatori (mai bypass permessi)
+        # Build agy command with mandatory sandbox and mode flags (never bypass permissions)
         cmd = [
             self.agy_binary,
             "-p", prompt,
-            # Il formato JSON della CLI AGY restituisce un envelope tecnico che
-            # in alcune versioni ha `response` vuoto pur con exit code 0. Il
-            # sidecar deve quindi ricevere il testo finale, da inoltrare alla
-            # chat Telegram e ai report del workflow.
+            # The AGY CLI JSON format returns a technical envelope that in some
+            # versions has an empty 'response' even with exit code 0. The sidecar
+            # must therefore receive final text to forward downstream.
             "--output-format", "text",
-            # Il testo della chat e' dato non fidato: non deve attivare slash
-            # command o skill della CLI (es. il messaggio iniziale `/agy`).
+            # Chat text is untrusted data: must not trigger slash commands or CLI skills.
             "--disable-slash-commands",
             "--print-timeout", f"{timeout}s",
             "--add-dir", str(worktree),
@@ -319,7 +317,7 @@ class HostAgyDaemon:
         if model:
             cmd.extend(["--model", model])
 
-        # Sanitizzazione rigorosa su allowlist minima (zero segreti Taktstock/API)
+        # Strict sanitization on minimal allowlist (zero Taktstock/API secrets)
         child_env = self.build_child_env()
 
         self.audit_log("JOB_STARTED", {
@@ -388,7 +386,7 @@ class HostAgyDaemon:
                     "status": "ERROR",
                     "code": 124,
                     "stdout": "",
-                    "stderr": f"Timeout esecuzione AGY ({timeout}s)."
+                    "stderr": f"AGY execution timeout (Timeout esecuzione AGY) ({timeout}s)."
                 }
 
             t_out.join(timeout=2.0)
@@ -401,7 +399,7 @@ class HostAgyDaemon:
                     "status": "ERROR",
                     "code": 137,
                     "stdout": "",
-                    "stderr": f"Limite di output superato (max {MAX_OUTPUT_BYTES} byte). Processo terminato forzatamente."
+                    "stderr": f"Output limit exceeded (Limite di output superato) (max {MAX_OUTPUT_BYTES} byte). Process forcibly terminated."
                 }
 
             stdout_str = b"".join(stdout_chunks).decode("utf-8", errors="replace")
@@ -427,22 +425,22 @@ class HostAgyDaemon:
             return {"status": "ERROR", "code": 1, "stdout": "", "stderr": str(e)}
 
     def handle_client(self, client_sock: socket.socket):
-        """Gestisce una connessione client con validazione peer credentials, token e concorrenza."""
+        """Handles a client connection with peer credentials validation, token, and concurrency."""
         try:
-            # 1. Verifica Peer Credentials: UID 0 categoricamente respinto
+            # 1. Verify Peer Credentials: UID 0 categorically rejected
             peer = get_peer_credentials(client_sock)
             if peer:
                 pid, uid, gid = peer
                 if uid == 0 or (self.allowed_client_uids is not None and uid not in self.allowed_client_uids):
-                    logger.warning(f"Rifiutata connessione da UID {uid} non autorizzato (PID {pid})")
+                    logger.warning(f"Rejected connection from unauthorized UID {uid} (PID {pid})")
                     self.audit_log("UNAUTHORIZED_PEER_UID", {"uid": uid, "pid": pid})
                     client_sock.sendall(json.dumps({
                         "status": "ERROR",
-                        "error": f"UID {uid} non autorizzato sul socket AGY (UID 0 categoricamente vietato)."
+                        "error": f"UID {uid} not authorized on AGY socket (UID 0 categoricamente vietato / categorically forbidden)."
                     }).encode("utf-8"))
                     return
 
-            # 2. Lettura stream payload
+            # 2. Read stream payload
             data = b""
             while True:
                 chunk = client_sock.recv(4096)
@@ -453,7 +451,7 @@ class HostAgyDaemon:
                     self.audit_log("REQUEST_SIZE_EXCEEDED", {"received_bytes": len(data)})
                     client_sock.sendall(json.dumps({
                         "status": "ERROR",
-                        "error": f"Richiesta socket eccede la dimensione massima consentita ({MAX_OUTPUT_BYTES} byte)."
+                        "error": f"Socket request exceeds maximum allowed size (dimensione massima consentita) ({MAX_OUTPUT_BYTES} byte)."
                     }).encode("utf-8"))
                     return
                 if b"\n" in data:
@@ -466,17 +464,17 @@ class HostAgyDaemon:
             try:
                 req_json = json.loads(raw_str)
             except Exception as e:
-                client_sock.sendall(json.dumps({"status": "ERROR", "error": f"JSON malformato: {e}"}).encode("utf-8"))
+                client_sock.sendall(json.dumps({"status": "ERROR", "error": f"Malformed JSON: {e}"}).encode("utf-8"))
                 return
 
-            # 3. Validazione schema e token
+            # 3. Validate schema and token
             is_valid, err_msg, sanitized = validate_agy_request(req_json, self.auth_token, allowed_roots=self.allowed_roots)
             if not is_valid:
                 self.audit_log("REQUEST_REJECTED", {"reason": err_msg})
                 client_sock.sendall(json.dumps({"status": "ERROR", "error": err_msg}).encode("utf-8"))
                 return
 
-            # 3b. Operazione rapida di readiness/health check: risposta immediata senza job_lock o processi figli
+            # 3b. Fast readiness/health check: immediate response without job_lock or child processes
             if sanitized.get("action") == "ready":
                 self.audit_log("READINESS_CHECK", {"status": "SUCCESS"})
                 client_sock.sendall(json.dumps({
@@ -486,13 +484,13 @@ class HostAgyDaemon:
                 }).encode("utf-8"))
                 return
 
-            # 4. Concorrenza: 1 solo job per volta
+            # 4. Concurrency: 1 job at a time
             acquired = self.job_lock.acquire(blocking=False)
             if not acquired:
                 self.audit_log("REQUEST_BUSY", {})
                 client_sock.sendall(json.dumps({
                     "status": "BUSY",
-                    "error": "Il runner host AGY è attualmente occupato con un altro task. Riprova più tardi."
+                    "error": "The AGY host runner is currently busy (occupato) with another task. Please retry later."
                 }).encode("utf-8"))
                 return
 
@@ -503,7 +501,7 @@ class HostAgyDaemon:
                 self.job_lock.release()
 
         except Exception as e:
-            logger.error(f"Errore gestione client socket AGY: {e}")
+            logger.error(f"Error handling AGY client socket: {e}")
             try:
                 client_sock.sendall(json.dumps({"status": "ERROR", "error": str(e)}).encode("utf-8"))
             except Exception:
@@ -512,7 +510,7 @@ class HostAgyDaemon:
             client_sock.close()
 
     def run(self):
-        """Avvia il server Unix Domain Socket per AGY."""
+        """Starts Unix Domain Socket server for AGY."""
         if self.socket_path.exists():
             self.socket_path.unlink()
 
@@ -525,14 +523,14 @@ class HostAgyDaemon:
             pass
         server.listen(10)
         self.running = True
-        logger.info(f"AGY Host Daemon in ascolto su Unix Socket: {self.socket_path} (mode 0600)")
+        logger.info(f"AGY Host Daemon listening on Unix Socket: {self.socket_path} (mode 0600)")
 
         try:
             while self.running:
                 client_sock, _ = server.accept()
                 threading.Thread(target=self.handle_client, args=(client_sock,), daemon=True).start()
         except KeyboardInterrupt:
-            logger.info("Chiusura demone AGY su richiesta.")
+            logger.info("Closing AGY daemon upon request.")
         finally:
             server.close()
             if self.socket_path.exists():

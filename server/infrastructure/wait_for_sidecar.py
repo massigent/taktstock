@@ -2,8 +2,8 @@
 """
 Readiness Gate for Taktstock Container Service
 ----------------------------------------------
-Interroga il sidecar host via socket Unix con azione autenticata 'ready',
-garantendo che socket e token siano attivi prima di avviare il container.
+Queries the host sidecar via Unix socket with authenticated 'ready' action,
+ensuring that socket and token are active before starting the container.
 """
 
 import os
@@ -60,7 +60,7 @@ def main():
             sys.exit(0)
         time.sleep(0.2)
 
-    sys.stderr.write(f"ERRORE: Sidecar non pronto entro il timeout di {args.timeout}s.\n")
+    sys.stderr.write(f"ERROR: Sidecar not ready within timeout of {args.timeout}s (Sidecar non pronto entro il timeout).\n")
     sys.exit(1)
 
 

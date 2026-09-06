@@ -59,14 +59,14 @@ logger = logging.getLogger("AgentGateway")
 
 
 def is_sidecar_mode_enabled() -> bool:
-    """Verifica se la modalità sidecar host (Codex o AGY) è abilitata tramite feature flag."""
+    """Checks whether host sidecar mode (Codex or AGY) is enabled via feature flags."""
     codex_flag = (os.environ.get("TAKTSTOCK_HOST_CODEX_SIDECAR") or os.environ.get("UFFICIO_HOST_CODEX_SIDECAR", "0")).strip().lower() in ("1", "true", "yes")
     agy_flag = (os.environ.get("TAKTSTOCK_HOST_AGY_SIDECAR") or os.environ.get("UFFICIO_HOST_AGY_SIDECAR", "0")).strip().lower() in ("1", "true", "yes")
     return codex_flag or agy_flag
 
 
 def resolve_agent_provider_and_model(agent_role: str) -> Tuple[str, str]:
-    """Risolve provider e modello a partire dal ruolo o nome dell'agente."""
+    """Resolves provider and model from agent role or name."""
     role = (agent_role or "").strip().lower()
     if role in ["sol", "director"]:
         return "openai_codex", "gpt-5.6-sol"
@@ -90,12 +90,12 @@ class AgentGateway:
 
     @classmethod
     def get_telemetry_repository(cls):
-        """Lazy-loader per TelemetryRepository."""
+        """Lazy-loader for TelemetryRepository."""
         if cls._telemetry_repo is None and TelemetryRepository is not None:
             try:
                 cls._telemetry_repo = TelemetryRepository()
             except Exception as e:
-                logger.warning(f"[AgentGateway] Inizializzazione telemetria fallita: {e}")
+                logger.warning(f"[AgentGateway] Telemetry initialization failed: {e}")
         return cls._telemetry_repo
 
     @classmethod
@@ -126,7 +126,7 @@ class AgentGateway:
         call_reason: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[str]:
-        """Metodo centrale per registrare telemetria in modo sicuro e non bloccante."""
+        """Centralized method to safely record telemetry non-blockingly."""
         repo = cls.get_telemetry_repository()
         if repo is None:
             return None
@@ -158,7 +158,7 @@ class AgentGateway:
                 metadata=metadata
             )
         except Exception as e:
-            logger.warning(f"[AgentGateway] Registrazione telemetria non riuscita: {e}")
+            logger.warning(f"[AgentGateway] Telemetry recording failed: {e}")
             return None
 
     @classmethod
@@ -179,8 +179,8 @@ class AgentGateway:
         timeout: Optional[int] = None
     ) -> Tuple[bool, str, Dict[str, Any]]:
         """
-        Esegue la chiamata all'agente in modalità centralizzata.
-        Ritorna: (success: bool, output_or_error_msg: str, metadata: dict)
+        Executes agent call in centralized mode.
+        Returns: (success: bool, output_or_error_msg: str, metadata: dict)
         """
         agent = (agent_role or "").strip().lower()
         provider, model = resolve_agent_provider_and_model(agent)
@@ -198,7 +198,7 @@ class AgentGateway:
                         out[k] = v
             return out
 
-        # Determina motivo di escalation se non esplicito
+        # Determine escalation reason if not explicit
         if not escalation_reason:
             if preset == "critical":
                 escalation_reason = "critical_preset"
@@ -208,7 +208,7 @@ class AgentGateway:
         if not is_sidecar_mode_enabled():
             return False, "LEGACY_MODE", {}
 
-        # 1. Risoluzione profilo per il sidecar
+        # 1. Sidecar profile resolution
         if agent in ["sol", "director", "bonus"]:
             profile = "sol"
         elif agent in ["luna"]:
@@ -220,13 +220,13 @@ class AgentGateway:
         else:
             profile = agent
 
-        # 2. Risoluzione ragionamento:
+        # 2. Reasoning effort resolution
         if profile in ["sol", "director"]:
             effort: Optional[str] = reasoning_effort or ("high" if preset == "critical" else "low")
         else:
             effort = None
 
-        # 3. Risoluzione worktree autorizzato (deve essere una sottocartella reale, mai root)
+        # 3. Authorized worktree resolution (must be a real subdirectory, never root)
         if worktree_path:
             wt = Path(worktree_path).resolve()
         else:
@@ -241,7 +241,7 @@ class AgentGateway:
                 pass
             wt = base_dir.resolve()
 
-        # 4. Invocazione HostAgyClient per AGY o HostCodexClient per Codex
+        # 4. Invocate HostAgyClient for AGY or HostCodexClient for Codex
         if agent == "agy":
             effective_sandbox = "read-only" if phase == "chat" else sandbox_mode
             try:
@@ -344,7 +344,7 @@ class AgentGateway:
 
             except AgySidecarBusyError as e:
                 duration_ms = int((time.perf_counter() - start_time) * 1000)
-                user_msg = f"⚠️ Runner host AGY occupato: {e}"
+                user_msg = f"⚠️ Host AGY runner busy (Runner host AGY occupato): {e}"
                 logger.warning(f"[AgentGateway] {user_msg}")
                 cls.record_telemetry(
                     agent_role="agy",
@@ -368,7 +368,7 @@ class AgentGateway:
 
             except AgySidecarTimeoutError as e:
                 duration_ms = int((time.perf_counter() - start_time) * 1000)
-                user_msg = f"TIME_BUDGET_EXCEEDED: Timeout esecuzione superato ({e})"
+                user_msg = f"TIME_BUDGET_EXCEEDED: Execution timeout exceeded ({e})"
                 logger.warning(f"[AgentGateway] {user_msg}")
                 cls.record_telemetry(
                     agent_role="agy",
@@ -392,7 +392,7 @@ class AgentGateway:
 
             except AgySidecarError as e:
                 duration_ms = int((time.perf_counter() - start_time) * 1000)
-                user_msg = f"⚠️ Errore di esecuzione AGY sidecar: {e}"
+                user_msg = f"⚠️ AGY sidecar execution error (Errore di esecuzione AGY sidecar): {e}"
                 logger.error(f"[AgentGateway] {user_msg}")
                 cls.record_telemetry(
                     agent_role="agy",
@@ -448,7 +448,7 @@ class AgentGateway:
             out_str = str(output or "")
             est_tokens = tokens if tokens is not None else max(1, (prompt_len + len(out_str)) // 4)
 
-            # Registrazione Telemetria Successo
+            # Record Success Telemetry
             cls.record_telemetry(
                 agent_role=agent,
                 provider=provider,
@@ -496,7 +496,7 @@ class AgentGateway:
 
         except CodexSidecarBusyError as e:
             duration_ms = int((time.perf_counter() - start_time) * 1000)
-            user_msg = f"⚠️ Runner host occupato: {e}"
+            user_msg = f"⚠️ Host runner busy (Runner host occupato): {e}"
             logger.warning(f"[AgentGateway] {user_msg}")
 
             cls.record_telemetry(
@@ -521,7 +521,7 @@ class AgentGateway:
 
         except CodexSidecarError as e:
             duration_ms = int((time.perf_counter() - start_time) * 1000)
-            user_msg = f"⚠️ Errore di esecuzione: {e}"
+            user_msg = f"⚠️ Execution error (Errore di esecuzione): {e}"
             logger.error(f"[AgentGateway] {user_msg}")
 
             cls.record_telemetry(
@@ -546,8 +546,8 @@ class AgentGateway:
 
         except Exception as e:
             duration_ms = int((time.perf_counter() - start_time) * 1000)
-            user_msg = f"⚠️ Errore imprevisto durante la comunicazione con il sidecar host."
-            logger.error(f"[AgentGateway] Eccezione non gestita: {e}")
+            user_msg = "⚠️ Unexpected error during host sidecar communication."
+            logger.error(f"[AgentGateway] Unhandled exception: {e}")
 
             cls.record_telemetry(
                 agent_role=agent,

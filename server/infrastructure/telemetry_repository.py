@@ -2,8 +2,8 @@
 """
 Agent Usage Telemetry Repository (Phase 1 Observability)
 --------------------------------------------------------
-Registrazione append-only, non bloccante e privacy-safe di ogni invocazione agente.
-Nessun salvataggio di prompt, risposte, chiavi, auth o percorsi assoluti.
+Append-only, non-blocking, and privacy-safe logging for each agent invocation.
+No storage of raw prompts, responses, credentials, auth tokens, or absolute host paths.
 """
 
 import os
@@ -22,7 +22,7 @@ except ImportError:
 
 logger = logging.getLogger("TelemetryRepository")
 
-# Regex per estrazione token riportati in modo affidabile da output CLI Codex
+# Regex for reliable extraction of reported tokens from Codex CLI output
 CODEX_TOKENS_REGEX = re.compile(r"tokens used\s+(\d+)", re.IGNORECASE)
 
 SAFE_METADATA_KEYS = {
@@ -36,7 +36,7 @@ SAFE_METADATA_KEYS = {
 
 
 def sanitize_telemetry_metadata(raw_meta: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Filtra e serializza i soli metadati sicuri, escludendo prompt, risposte e path."""
+    """Filters and serializes only safe metadata, excluding raw prompts, responses, and host paths."""
     if not isinstance(raw_meta, dict):
         return None
     safe_dict = {}
@@ -51,13 +51,13 @@ def sanitize_telemetry_metadata(raw_meta: Optional[Dict[str, Any]]) -> Optional[
 
 def extract_token_breakdown(raw_output: str, meta: Optional[Dict[str, Any]] = None) -> Dict[str, Optional[int]]:
     """
-    Estrae i token in modo affidabile distinguendo:
+    Reliably extracts tokens by distinguishing:
     - total_tokens
     - input_tokens (prompt)
     - output_tokens (completion)
     - thinking_tokens (reasoning)
     - cache_read_tokens (prompt cached)
-    Non somma mai i token di cache_read ai token fatturati senza etichetta esplicita.
+    Never adds cache_read tokens to billed tokens without an explicit label.
     """
     breakdown: Dict[str, Optional[int]] = {
         "total_tokens": None,
@@ -164,7 +164,7 @@ def extract_token_breakdown(raw_output: str, meta: Optional[Dict[str, Any]] = No
 
 
 def extract_reported_tokens(raw_output: str, meta: Optional[Dict[str, Any]] = None) -> Optional[int]:
-    """Estrae i token totali riportati in modo affidabile se presenti nel testo o metadati."""
+    """Reliably extracts reported total tokens if present in output text or metadata."""
     bd = extract_token_breakdown(raw_output, meta)
     return bd.get("total_tokens")
 
@@ -202,13 +202,13 @@ class TelemetryRepository:
         metadata: Optional[Dict[str, Any]] = None
     ) -> Optional[str]:
         """
-        Registra un evento di utilizzo agente. Completamente NON BLOCCANTE.
-        Non solleva mai eccezioni verso il chiamante.
+        Records an agent usage event. Completely NON-BLOCKING.
+        Never raises exceptions to the caller.
         """
         event_id = uuid.uuid4().hex
         created_at = utc_now_iso()
 
-        # Calcolo stima se non fornita
+        # Calculate estimate if not provided
         if estimated_tokens is None:
             out_len = int(metadata.get("output_length", 0)) if isinstance(metadata, dict) else 0
             estimated_tokens = reported_tokens if reported_tokens is not None else max(1, (prompt_length + out_len) // 4)
@@ -258,15 +258,15 @@ class TelemetryRepository:
                 )
             return event_id
         except Exception as e:
-            logger.warning(f"Errore non bloccante registrazione telemetria: {e}")
+            logger.warning(f"Non-blocking telemetry logging error (errore non bloccante registrazione telemetria): {e}")
             return None
 
     def get_usage_summary(self, days: int = 7) -> Dict[str, Any]:
-        """Restituisce l'aggregazione di utilizzo per gli ultimi N giorni."""
+        """Returns aggregated usage metrics for the last N days."""
         since_iso = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
         try:
             with self.db_manager.connection() as conn:
-                # 1. Aggregazione per agente e modello
+                # 1. Aggregate by agent and model
                 cursor = conn.execute(
                     """
                     SELECT
@@ -287,7 +287,7 @@ class TelemetryRepository:
                 )
                 summary_rows = [dict(row) for row in cursor.fetchall()]
 
-                # 2. Aggregazione per escalation
+                # 2. Aggregate by escalation reason
                 esc_cursor = conn.execute(
                     """
                     SELECT
@@ -302,7 +302,7 @@ class TelemetryRepository:
                 )
                 escalation_rows = [dict(row) for row in esc_cursor.fetchall()]
 
-                # 3. Totali complessivi
+                # 3. Overall totals
                 total_calls = sum(r["total_calls"] for r in summary_rows)
                 total_tokens = sum(r["total_reported_tokens"] for r in summary_rows)
 
@@ -315,7 +315,7 @@ class TelemetryRepository:
                     "escalations": escalation_rows
                 }
         except Exception as e:
-            logger.error(f"Errore recupero sommario telemetria: {e}")
+            logger.error(f"Error fetching telemetry summary (errore recupero sommario telemetria): {e}")
             return {
                 "days": days,
                 "since": since_iso,
@@ -326,18 +326,18 @@ class TelemetryRepository:
             }
 
     def format_cli_report(self, days: int = 7) -> str:
-        """Genera un report formattato per la CLI."""
+        """Generates a formatted report for the CLI."""
         summary = self.get_usage_summary(days=days)
         lines = [
             "=" * 96,
-            f"📊 REPORT UTILIZZO AGENTI - ULTIMI {days} GIORNI (dal {summary['since'][:10]})",
+            f"📊 AGENT USAGE REPORT / REPORT UTILIZZO AGENTI - LAST {days} DAYS (dal {summary['since'][:10]})",
             "=" * 96,
-            f"{'Agente':<12} {'Modello':<24} {'Chiamate':<10} {'Success':<9} {'Fail':<8} {'Durata Media':<18} {'Token Totali':<12}",
+            f"{'Agent':<12} {'Model':<24} {'Calls':<10} {'Success':<9} {'Fail':<8} {'Avg Duration':<18} {'Total Tokens':<12}",
             "-" * 96
         ]
 
         if not summary["agents"]:
-            lines.append("Nessun evento di utilizzo registrato nel periodo.")
+            lines.append("No usage events recorded in this period (Nessun evento di utilizzo registrato nel periodo).")
         else:
             for r in summary["agents"]:
                 avg_dur = f"{r['avg_duration_ms']} ms"
@@ -347,10 +347,10 @@ class TelemetryRepository:
                 )
 
         lines.append("-" * 96)
-        lines.append(f"TOTALI: {summary['total_calls']} chiamate | {summary['total_reported_tokens']:,} token riportati")
+        lines.append(f"TOTALS: {summary['total_calls']} calls | {summary['total_reported_tokens']:,} reported tokens (TOTALI: {summary['total_calls']} chiamate | {summary['total_reported_tokens']:,} token riportati)")
 
         if summary["escalations"]:
-            lines.append("\n📈 CONTEGGIO ESCALATION:")
+            lines.append("\n📈 ESCALATION COUNT / CONTEGGIO ESCALATION:")
             for esc in summary["escalations"]:
                 lines.append(f"  • {esc['escalation_reason']}: {esc['count']}")
 

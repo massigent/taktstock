@@ -1,8 +1,8 @@
 """
 Infrastructure Layer for Taktstock
 ----------------------------------
-Contiene la persistenza SQLite, i repository per sessioni e run,
-e i moduli di gestione dello stato per l'ecosistema Taktstock.
+Contains SQLite persistence, repositories for sessions and runs,
+and state management adapters for the Taktstock ecosystem.
 """
 
 from .database import DatabaseManager

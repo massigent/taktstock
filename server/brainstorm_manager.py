@@ -167,16 +167,16 @@ def validate_structured_summary(raw_output: str) -> Tuple[bool, Optional[Dict[st
     """
     Valida rigorosamente l'output del compattatore Gemini:
     - Deve essere JSON valido
-    - Deve contenere tutti i campi richiesti: facts, decisions, constraints, open_questions, next_steps
-    - Ogni campo deve essere una lista di stringhe non vuote
-    - Rifiuta stringhe vuote, messaggi di errore (rate limit, quota, traceback) o strutture incomplete
+    - Must contain all required fields: facts, decisions, constraints, open_questions, next_steps
+    - Each field must be a list of non-empty strings
+    - Rejects empty strings, error messages (rate limit, quota, traceback) or incomplete structures
     """
     if not raw_output or not isinstance(raw_output, str):
-        return False, None, "Output compattazione assente o non di tipo stringa."
+        return False, None, "Compaction output missing or not a string (Output compattazione assente o non di tipo stringa)."
 
     clean_text = raw_output.strip()
 
-    # Rifiuta esplicitamente messaggi di errore o quota tipici di API/LLM
+    # Explicitly reject typical API/LLM error or quota messages
     error_patterns = [
         r"rate[_\s-]?limit",
         r"quota[_\s-]?exceeded",
@@ -188,9 +188,9 @@ def validate_structured_summary(raw_output: str) -> Tuple[bool, Optional[Dict[st
     ]
     for pat in error_patterns:
         if re.search(pat, clean_text, re.IGNORECASE):
-            return False, None, f"Output compattazione contiene un errore o messaggio di quota: {clean_text[:120]}"
+            return False, None, f"Compaction output contains error or quota message: {clean_text[:120]}"
 
-    # Estrazione blocco JSON (gestisce ```json ... ``` o JSON grezzo)
+    # Extract JSON block (handles ```json ... ``` or raw JSON)
     json_str = clean_text
     if "```json" in json_str:
         json_str = json_str.split("```json", 1)[1].split("```", 1)[0].strip()
@@ -200,25 +200,25 @@ def validate_structured_summary(raw_output: str) -> Tuple[bool, Optional[Dict[st
     try:
         parsed = json.loads(json_str)
     except Exception as e:
-        return False, None, f"JSON non valido nell'output di compattazione: {e}"
+        return False, None, f"Invalid JSON in compaction output (JSON non valido nell'output di compattazione): {e}"
 
     if not isinstance(parsed, dict):
-        return False, None, "L'output di compattazione deve essere un oggetto JSON (dict)."
+        return False, None, "Compaction output must be a JSON object (dict)."
 
     validated_data: Dict[str, List[str]] = {}
     total_entries = 0
 
     for field in REQUIRED_SUMMARY_FIELDS:
         if field not in parsed:
-            return False, None, f"Campo obbligatorio '{field}' mancante nel JSON di compattazione."
+            return False, None, f"Required field '{field}' missing in compaction JSON (campo obbligatorio mancante)."
         val = parsed[field]
         if not isinstance(val, list):
-            return False, None, f"Il campo '{field}' deve essere una lista di stringhe (trovato {type(val).__name__})."
+            return False, None, f"Field '{field}' must be a list of strings (found {type(val).__name__})."
 
         clean_list = []
         for idx, item in enumerate(val):
             if not isinstance(item, str):
-                return False, None, f"Elemento #{idx} in '{field}' non è una stringa."
+                return False, None, f"Item #{idx} in '{field}' is not a string."
             s = item.strip()
             if s:
                 clean_list.append(s)
@@ -226,7 +226,7 @@ def validate_structured_summary(raw_output: str) -> Tuple[bool, Optional[Dict[st
         total_entries += len(clean_list)
 
     if total_entries == 0:
-        return False, None, "Il riassunto non contiene alcun elemento significativo nei campi strutturati."
+        return False, None, "Summary does not contain any meaningful items in structured fields."
 
     return True, validated_data, ""
 
@@ -387,37 +387,37 @@ AGENT_META = {
 def atomic_write_json(path: Path, data: Any, indent: int = 2) -> bool:
     """
     Scrive atomicamente un file JSON usando un file temporaneo nella stessa directory,
-    con flush, fsync e os.replace finale.
-    - Il file temporaneo è creato con mode 0600 tramite os.open (bypassando umask).
-    - os.fchmod garantisce 0600 prima del replace, indipendentemente dalla umask.
-    - os.replace è atomico sul pathname: non segue symlink di destinazione.
-    - In caso di errore, rimuove il temporaneo e preserva il file originale.
+    with flush, fsync, and final os.replace.
+    - Temporary file is created with mode 0600 via os.open (bypassing umask).
+    - os.fchmod guarantees 0600 before replace, regardless of umask.
+    - os.replace is atomic on the pathname: does not follow target symlinks.
+    - On error, cleans up the temp file and preserves the original.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.parent / f".tmp_{path.name}_{os.getpid()}_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     fd = None
     try:
         content = json.dumps(data, indent=indent, ensure_ascii=False).encode("utf-8")
-        # Apri con mode 0600 bypassando umask; O_EXCL impedisce di aprire file già esistenti
+        # Open with mode 0600 bypassing umask; O_EXCL prevents opening existing files
         fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             os.fchmod(fd, 0o600)
         except Exception:
             pass
         with os.fdopen(fd, "wb") as f:
-            fd = None  # fdopen prende ownership del fd
+            fd = None  # fdopen takes ownership of fd
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
         os.replace(str(tmp_path), str(path))
-        # Assicura 0600 anche sul file di destinazione (per file preesistenti con permessi diversi)
+        # Ensure 0600 on target file as well
         try:
             os.chmod(str(path), 0o600)
         except Exception:
             pass
         return True
     except Exception as e:
-        logger.error(f"Errore scrittura atomica JSON in {path}: {e}")
+        logger.error(f"Atomic JSON write error in {path}: {e}")
         if fd is not None:
             try:
                 os.close(fd)
@@ -759,23 +759,23 @@ class BrainstormManager:
             data = json.loads(path.read_text(encoding="utf-8"))
             if "messages" not in data:
                 data["messages"] = []
-            # Retrocompatibilità per sessioni prive di revision o channel
+            # Backward compatibility for sessions missing revision or channel
             if "revision" not in data:
                 data["revision"] = 0
             if "channel" not in data:
                 data["channel"] = "unknown"
         except Exception as e:
-            logger.error(f"Errore caricamento brainstorm {brainstorm_id}: {e}")
+            logger.error(f"Error loading brainstorm {brainstorm_id}: {e}")
             return None
 
-        # Shadow read e confronto semantico (se abilitato)
+        # Shadow read and semantic comparison (if enabled)
         if self.state_adapter is not None:
             try:
                 self.state_adapter.shadow_compare(brainstorm_id, data)
             except Exception as e:
-                logger.warning(f"Errore inatteso shadow compare per {brainstorm_id}: {e}")
+                logger.warning(f"Unexpected shadow compare error for {brainstorm_id}: {e}")
 
-        # Restituisce SEMPRE il JSON come fonte autorevole
+        # ALWAYS returns JSON as the authoritative source
         return data
 
     def save_brainstorm(self, data: Dict[str, Any]) -> bool:
@@ -783,22 +783,22 @@ class BrainstormManager:
         if not bs_id:
             return False
         path = self.get_file_path(bs_id)
-        # Prepara la nuova revision ma scrive prima, per non avanzare l'indice in caso di errore
+        # Prepare new revision before writing, to avoid advancing index on error
         next_revision = int(data.get("revision", 0)) + 1
         updated_at = datetime.now().isoformat()
         data["revision"] = next_revision
         data["updated_at"] = updated_at
         if not atomic_write_json(path, data):
-            # Ripristina la revision precedente: il salvataggio non è avvenuto
+            # Revert to previous revision: save did not succeed
             data["revision"] = next_revision - 1
             return False
 
-        # Shadow write in SQLite dopo che il JSON è stato salvato con successo
+        # Shadow write to SQLite after JSON was successfully saved
         if self.state_adapter is not None:
             try:
                 self.state_adapter.shadow_save(data)
             except Exception as e:
-                logger.warning(f"Errore inatteso shadow write per {bs_id}: {e}")
+                logger.warning(f"Unexpected shadow write error for {bs_id}: {e}")
         return True
 
     def list_brainstorms(self) -> List[Dict[str, Any]]:
@@ -1238,8 +1238,8 @@ Respond EXCLUSIVELY in JSON:
 
             if fresh_bs.get("revision", 0) != snapshot_revision:
                 logger.info(
-                    f"Compattazione scartata per [{bs_id}]: revision cambiata durante la chiamata LLM "
-                    f"({snapshot_revision} -> {fresh_bs.get('revision')}). Nessun messaggio o indice alterato."
+                    f"Compaction discarded for [{bs_id}]: revision changed during LLM call "
+                    f"({snapshot_revision} -> {fresh_bs.get('revision')}). No messages or index altered (Compattazione scartata)."
                 )
                 return False
 
@@ -1251,14 +1251,14 @@ Respond EXCLUSIVELY in JSON:
                 "id": _generate_message_id("compaction"),
                 "sender": "Gemini Compactor",
                 "agent": "gemini",
-                "text": "⚡ *[Memoria Compattata]* Ho archiviato i punti chiave discussi finora per ottimizzare i token. La conversazione prosegue con pieno contesto!",
+                "text": "⚡ *[Memoria Compattata]* Key discussion points have been archived to optimize tokens. The conversation continues with full context!",
                 "timestamp": datetime.now().isoformat(),
                 "message_type": "compaction_notice",
                 "exclude_from_context": True
             }
             fresh_bs["messages"].append(compaction_msg)
             self.save_brainstorm(fresh_bs)
-            logger.info(f"Auto-compattazione completata per [{bs_id}] all'indice {target_compacted_index}.")
+            logger.info(f"Auto-compaction completed for [{bs_id}] at index {target_compacted_index}.")
             # If caller passed the brainstorm dict directly, update it in-place so caller sees changes
             if isinstance(brainstorm_id_or_bs, dict):
                 brainstorm_id_or_bs.clear()
@@ -1706,13 +1706,13 @@ Respond EXCLUSIVELY in JSON:
                         reasoning_effort=reasoning_effort,
                         sandbox_mode="read-only"
                     )
-                    # In sidecar mode è categoricamente VIETATO qualunque fallback locale
+                    # In sidecar mode, any local fallback is strictly FORBIDDEN
                     return output
             except Exception as e:
-                logger.error(f"Errore AgentGateway: {e}")
-                return f"⚠️ Errore esecuzione agente {agent}: {e}"
+                logger.error(f"AgentGateway error: {e}")
+                return f"⚠️ Agent {agent} execution error (Errore esecuzione agente): {e}"
 
-            # Flusso Legacy (quando sidecar non attivo)
+            # Legacy flow (when sidecar is not active)
             try:
                 from account_manager import CodexAccountManager
                 am = CodexAccountManager()
@@ -1989,7 +1989,7 @@ Respond EXCLUSIVELY in JSON:
                 "id": _generate_message_id("sol"),
                 "sender": "Sol",
                 "agent": "sol",
-                "text": f"🧠 Team della sessione aggiornato: {labels}. I reviewer indipendenti restano disponibili su richiesta o quando Sol ritiene che il task lo richieda.",
+                "text": f"🧠 Session team updated: {labels}. Independent reviewers remain available on request or when Sol determines the task requires them.",
                 "timestamp": datetime.now().isoformat()
             }
             self._append_reply_under_lock(
@@ -2002,10 +2002,11 @@ Respond EXCLUSIVELY in JSON:
             )
             return [reply_msg]
 
-        # --- A. INTENTO 1: Richiesta Elenco Progetti (/progetti, "quali sono i miei progetti") ---
+        # --- A. INTENT 1: Request Projects List (/projects, /progetti, "what are my projects") ---
         is_list_projects = (
             clean_without_mentions in ["/progetti", "/projects", "/repos", "/elenco", "progetti", "projects", "repos"] or
             any(p in clean_without_mentions for p in [
+                "what are my projects", "list projects", "show projects", "what projects are there",
                 "quali sono i miei progetti", "quali sono i progetti", "elencami i progetti",
                 "elenco progetti", "mostrami i progetti", "che progetti ci sono", "quali progetti ho",
                 "vedi i progetti", "vedere i progetti", "mostra i progetti", "dimmi i progetti"
@@ -2014,12 +2015,12 @@ Respond EXCLUSIVELY in JSON:
         if is_list_projects:
             menu_text = self.projects_manager.format_projects_telegram_menu()
             if bs.get("project_name"):
-                menu_text += f"\n\n📌 *Progetto attualmente attivo:* `{bs['project_name']}`"
+                menu_text += f"\n\n📌 *Currently active project:* `{bs['project_name']}`"
             reply_msg = {
                 "id": _generate_message_id(primary_agent),
                 "sender": primary_meta["name"],
                 "agent": primary_agent,
-                "text": f"{primary_meta['avatar']} *Ecco tutti i tuoi progetti configurati sul server:*\n\n{menu_text}",
+                "text": f"{primary_meta['avatar']} *Here are all your projects configured on the server:*\n\n{menu_text}",
                 "timestamp": datetime.now().isoformat()
             }
             self._append_reply_under_lock(brainstorm_id, reply_msg)
@@ -2359,17 +2360,17 @@ Respond EXCLUSIVELY in JSON:
                         agy_text = str(output or "").strip()
                         if not agy_text:
                             agy_text = (
-                                "⚠️ AGY ha concluso senza testo leggibile. Nessun risultato affidabile "
-                                "è disponibile: riprova la richiesta o avvia un audit tramite /sviluppa."
+                                "⚠️ AGY completed without readable output. No reliable result "
+                                "is available: please retry the request or launch an audit via /sviluppa."
                             )
                             is_agy_err = True
                     else:
-                        logger.error(f"Errore chiamata sidecar AGY nella chat: {output}")
+                        logger.error(f"AGY sidecar chat call error: {output}")
                         agy_text = f"⚠️ [AGY Sidecar Error] {output}"
                         is_agy_err = True
                 except Exception as e:
-                    logger.error(f"Eccezione durante la chiamata sidecar AGY: {e}")
-                    agy_text = f"⚠️ [AGY Sidecar Error] Impossibile contattare il runner host: {e}"
+                    logger.error(f"Exception during AGY sidecar call: {e}")
+                    agy_text = f"⚠️ [AGY Sidecar Error] Unable to contact host runner: {e}"
                     is_agy_err = True
 
             agy_msg = {

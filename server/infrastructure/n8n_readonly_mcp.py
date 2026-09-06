@@ -2,15 +2,15 @@
 """
 Taktstock Read-Only n8n MCP Server
 ----------------------------------
-Server MCP conforme allo standard Model Context Protocol (JSON-RPC 2.0 su stdio).
-Fornisce a Luna e agli agenti Taktstock accesso ESCLUSIVAMENTE IN SOLA LETTURA
-ai workflow live n8n per preflight, ispezione e sincronizzazione mirror.
+MCP server conforming to the Model Context Protocol standard (JSON-RPC 2.0 over stdio).
+Provides Luna and Taktstock agents EXCLUSIVELY READ-ONLY ACCESS
+to live n8n workflows for preflight, inspection, and mirror synchronization.
 
-Politica di sicurezza:
-- Supporta SOLO richieste HTTP GET verso le API n8n.
-- Nessun tool di scrittura, aggiornamento, esecuzione o cancellazione.
-- Rifiuto esplicito fail-closed per qualsiasi operazione mutante.
-- Nessuna propagazione o stampa di segreti/chiavi API.
+Security Policy:
+- Supports ONLY HTTP GET requests to n8n API.
+- No write, update, execute, or delete tools.
+- Explicit fail-closed rejection for any mutating operation.
+- No propagation or printing of API secrets/keys.
 """
 
 import os
@@ -22,7 +22,7 @@ import urllib.parse
 import urllib.error
 from typing import Dict, Any, List, Optional
 
-# Configurazione logging su stderr per non interferire con stdout JSON-RPC
+# Configure logging on stderr to avoid interfering with JSON-RPC stdout
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s][%(levelname)s][n8n-ro-mcp] %(message)s",
@@ -36,22 +36,22 @@ N8N_API_KEY = os.environ.get("N8N_API_KEY", "").strip()
 TOOLS_DEFINITIONS = [
     {
         "name": "search_workflows",
-        "description": "Cerca workflow n8n live per nome o tag (read-only). Restituisce catalogo e metadata.",
+        "description": "Search live n8n workflows by name or tag (read-only). Returns catalog and metadata.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Filtro per nome o descrizione del workflow"
+                    "description": "Filter by workflow name or description"
                 },
                 "tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "Filtro per tag del workflow"
+                    "description": "Filter by workflow tags"
                 },
                 "limit": {
                     "type": "integer",
-                    "description": "Numero massimo di risultati (default: 50, max: 100)",
+                    "description": "Maximum number of results (default: 50, max: 100)",
                     "default": 50
                 }
             }
@@ -59,27 +59,27 @@ TOOLS_DEFINITIONS = [
     },
     {
         "name": "get_workflow_details",
-        "description": "Recupera la definizione completa in sola lettura di un workflow (nodi, connessioni, settings, trigger).",
+        "description": "Retrieves the complete read-only definition of a workflow (nodes, connections, settings, triggers).",
         "inputSchema": {
             "type": "object",
             "required": ["workflowId"],
             "properties": {
                 "workflowId": {
                     "type": "string",
-                    "description": "ID univoco del workflow n8n da esportare/leggere"
+                    "description": "Unique ID of the n8n workflow to export/read"
                 }
             }
         }
     },
     {
         "name": "list_workflows",
-        "description": "Elenca tutti i workflow presenti nell'istanza n8n live con metadata essenziali.",
+        "description": "Lists all workflows present in the live n8n instance with essential metadata.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "limit": {
                     "type": "integer",
-                    "description": "Numero massimo di workflow da elencare (default: 100)",
+                    "description": "Maximum number of workflows to list (default: 100)",
                     "default": 100
                 }
             }
@@ -89,11 +89,11 @@ TOOLS_DEFINITIONS = [
 
 
 def _get_api_key() -> str:
-    """Recupera la chiave API da env o file di configurazione con fallback sicuro."""
+    """Retrieves API key from env or configuration file with safe fallback."""
     if N8N_API_KEY:
         return N8N_API_KEY
     
-    # Prova a leggere da config Luna
+    # Attempt to read from Luna config
     luna_cfg = os.path.expanduser("~/.codex/accounts/luna/config.toml")
     if os.path.exists(luna_cfg):
         try:
@@ -107,10 +107,10 @@ def _get_api_key() -> str:
 
 
 def n8n_get_request(endpoint: str, params: Optional[Dict[str, Any]] = None) -> Any:
-    """Esegue una chiamata HTTP GET in sola lettura all'API n8n."""
+    """Executes a read-only HTTP GET request to the n8n API."""
     api_key = _get_api_key()
     if not api_key:
-        raise RuntimeError("N8N_API_KEY non configurata. Impossibile accedere all'API n8n.")
+        raise RuntimeError("N8N_API_KEY not configured (N8N_API_KEY non configurata). Cannot access n8n API.")
 
     url = f"{N8N_API_URL}/{endpoint.lstrip('/')}"
     if params:
@@ -130,7 +130,7 @@ def n8n_get_request(endpoint: str, params: Optional[Dict[str, Any]] = None) -> A
 
     with urllib.request.urlopen(req, timeout=15) as resp:
         if resp.status != 200:
-            raise RuntimeError(f"API n8n ha risposto con codice HTTP {resp.status}")
+            raise RuntimeError(f"n8n API responded with HTTP status {resp.status}")
         raw_body = resp.read().decode("utf-8")
         return json.loads(raw_body)
 
@@ -149,11 +149,11 @@ def handle_search_workflows(args: Dict[str, Any]) -> Dict[str, Any]:
         wf_name = str(wf.get("name", "")).lower()
         wf_desc = str(wf.get("description", "") or "").lower()
         
-        # Filtro query
+        # Query filter
         if query and (query not in wf_name and query not in wf_desc and query != wf.get("id")):
             continue
 
-        # Filtro tag
+        # Tag filter
         wf_tags = {t.get("name") for t in wf.get("tags", []) if isinstance(t, dict)}
         if tag_filter and not tag_filter.issubset(wf_tags):
             continue
@@ -176,10 +176,10 @@ def handle_search_workflows(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_get_workflow_details(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Gestisce l'esportazione / lettura della struttura di un singolo workflow."""
+    """Handles export / reading of the structure of a single workflow."""
     wf_id = str(args.get("workflowId", "")).strip()
     if not wf_id:
-        raise ValueError("Parametro obbligatorio 'workflowId' mancante.")
+        raise ValueError("Missing required parameter 'workflowId' (parametro obbligatorio 'workflowId' mancante).")
 
     wf_data = n8n_get_request(f"api/v1/workflows/{wf_id}")
     return {
@@ -188,7 +188,7 @@ def handle_get_workflow_details(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_list_workflows(args: Dict[str, Any]) -> Dict[str, Any]:
-    """Elenca tutti i workflow con metadata."""
+    """Lists all workflows with metadata."""
     limit = min(int(args.get("limit", 100)), 100)
     data = n8n_get_request("api/v1/workflows", {"limit": limit})
     workflows = data.get("data", [])
@@ -209,7 +209,7 @@ def handle_list_workflows(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def process_jsonrpc_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Elabora un messaggio JSON-RPC in entrata conforme al protocollo MCP."""
+    """Processes an incoming JSON-RPC message compliant with the MCP protocol."""
     method = msg.get("method")
     msg_id = msg.get("id")
 
@@ -261,7 +261,7 @@ def process_jsonrpc_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                         "isError": True,
                         "content": [{
                             "type": "text",
-                            "text": f"Tool '{tool_name}' non consentito. Questo server MCP è rigorosamente in sola lettura (supporta solo search_workflows, get_workflow_details e list_workflows)."
+                            "text": f"Tool '{tool_name}' not allowed (non consentito). This MCP server is strictly read-only (supports only search_workflows, get_workflow_details, and list_workflows)."
                         }]
                     }
                 }
@@ -277,7 +277,7 @@ def process_jsonrpc_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 }
             }
         except Exception as e:
-            logger.error(f"Errore esecuzione tool {tool_name}: {e}")
+            logger.error(f"Error executing tool {tool_name}: {e}")
             return {
                 "jsonrpc": "2.0",
                 "id": msg_id,
@@ -285,7 +285,7 @@ def process_jsonrpc_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                     "isError": True,
                     "content": [{
                         "type": "text",
-                        "text": f"Errore read-only MCP: {str(e)}"
+                        "text": f"Read-only MCP error: {str(e)}"
                     }]
                 }
             }
@@ -304,15 +304,15 @@ def process_jsonrpc_message(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
                 "id": msg_id,
                 "error": {
                     "code": -32601,
-                    "message": f"Metodo non supportato: {method}"
+                    "message": f"Unsupported method (metodo non supportato): {method}"
                 }
             }
         return None
 
 
 def main():
-    """Loop principale stdio per il server MCP."""
-    logger.info("Avvio server n8n-readonly-mcp...")
+    """Main stdio loop for the MCP server."""
+    logger.info("Starting n8n-readonly-mcp server...")
     for line in sys.stdin:
         line = line.strip()
         if not line:
@@ -324,9 +324,9 @@ def main():
                 sys.stdout.write(json.dumps(resp, ensure_ascii=False) + "\n")
                 sys.stdout.flush()
         except json.JSONDecodeError:
-            logger.warning(f"Messaggio non valido: {line[:100]}")
+            logger.warning(f"Invalid JSON message: {line[:100]}")
         except Exception as e:
-            logger.error(f"Eccezione nel loop MCP: {e}")
+            logger.error(f"Exception in MCP loop: {e}")
 
 
 if __name__ == "__main__":

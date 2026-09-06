@@ -2,18 +2,18 @@
 """
 CLI Telemetry Reporter for Taktstock
 ------------------------------------
-Genera un riepilogo tabellare dell'utilizzo agenti (ultimi N giorni):
-- Chiamate totali, successi, fallimenti
-- Durata media (ms)
-- Token riportati totali
-- Conteggio escalation per motivo
+Generates a tabular summary of agent usage (last N days):
+- Total calls, successes, failures
+- Average duration (ms)
+- Total reported tokens
+- Escalation count by reason
 """
 
 import sys
 import argparse
 from pathlib import Path
 
-# Setup path di importazione
+# Setup import path
 SERVER_DIR = Path(__file__).resolve().parent.parent
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
@@ -25,13 +25,13 @@ except ImportError:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Report telemetria utilizzo agenti Taktstock (Fase 1).")
+    parser = argparse.ArgumentParser(description="Taktstock Agent Usage Telemetry Report (Phase 1).")
     parser.add_argument(
         "--days",
         "-d",
         type=int,
         default=7,
-        help="Numero di giorni di storico da analizzare (default: 7)"
+        help="Number of historical days to analyze (default: 7)"
     )
     args = parser.parse_args()
 

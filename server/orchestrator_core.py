@@ -193,7 +193,7 @@ DEFAULT_ROLE_MAX_OUTPUT_TOKENS: Dict[str, Dict[str, int]] = {
 
 
 def get_role_max_output_tokens(agent_role: str, phase: str = "execution", is_compact: bool = False) -> int:
-    """Restituisce la stima conservativa dei massimi token di output previsti per ruolo e fase."""
+    """Returns conservative estimate of maximum output tokens expected by role and phase."""
     role_key = str(agent_role).strip().lower().replace("-", "_")
     phase_key = str(phase).strip().lower()
 
@@ -317,17 +317,17 @@ def update_handoff_content_deterministic(content: str) -> str:
 
 
 class BudgetExceededError(Exception):
-    """Sollevata quando una chiamata eccede il budget configurato di token o chiamate LLM."""
+    """Raised when a call exceeds the configured token or LLM call budget."""
     pass
 
 
 class TimeBudgetExceededError(Exception):
-    """Sollevata quando il tempo di esecuzione di un subtask supera il soft budget configurato."""
+    """Raised when subtask execution time exceeds the configured soft budget."""
     pass
 
 
 class TokensDict(dict):
-    """Dizionario che distingue chiaramente i token non misurati/sconosciuti da 0 effettivi, stime e contatori di chiamate."""
+    """Dictionary clearly distinguishing unmeasured/unknown tokens from effective 0, estimates, and call counters."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         for k in ["agy", "luna", "sol", "deepseek_flash", "deepseek_pro", "glm_flash", "bonus", "total"]:
@@ -810,25 +810,25 @@ def check_read_only_invariance(repo_path: Path) -> Tuple[bool, Optional[str], st
 
 def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> Tuple[bool, Optional[str], Optional[str]]:
     """
-    Preflight Git rigoroso e non distruttivo per il progetto selezionato prima dell'esecuzione.
+    Rigorous, non-destructive Git preflight check for the selected project before execution.
 
-    Regole fondamentali:
-    - Verifica che il repository sia pulito (nessun file untracked o modifica pendente);
-    - Esegue 'git fetch --prune origin' se il remote 'origin' esiste;
-    - Aggiorna solo ed esclusivamente con 'git pull --ff-only';
-    - Se il ramo locale è ahead, divergente o il repository è dirty, blocca con BLOCKED_GIT_SYNC e istruzioni chiare;
-    - NON usa MAI reset, stash, clean o force;
-    - Registra il commit iniziale (HEAD) nel report.
+    Fundamental rules:
+    - Verifies repository is clean (no untracked files or pending changes);
+    - Runs 'git fetch --prune origin' if the remote 'origin' exists;
+    - Updates only and exclusively via 'git pull --ff-only';
+    - If local branch is ahead, divergent, or repo is dirty, blocks with BLOCKED_GIT_SYNC and clear instructions;
+    - NEVER uses reset, stash, clean, or force;
+    - Records the initial commit hash (HEAD) in the report.
 
-    Ritorna: (is_valid: bool, error_instructions_msg: Optional[str], initial_commit_hash: Optional[str])
+    Returns: (is_valid: bool, error_instructions_msg: Optional[str], initial_commit_hash: Optional[str])
     """
     if not repo_path:
-        return False, "BLOCKED_GIT_SYNC: Percorso repository non specificato.", None
+        return False, "BLOCKED_GIT_SYNC: Repository path not specified.", None
     p = Path(repo_path).resolve()
     if not p.exists() or not p.is_dir():
-        return False, f"BLOCKED_GIT_SYNC: Repository non trovato o non accessibile: '{p}'.", None
+        return False, f"BLOCKED_GIT_SYNC: Repository not found or not accessible: '{p}'.", None
 
-    # Verifica se è un repository Git
+    # Check if this is a Git repository
     try:
         res = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
@@ -838,12 +838,12 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
             timeout=10
         )
         if res.returncode != 0 or res.stdout.strip() != "true":
-            # Se non è una directory Git, passa il preflight senza modifiche
+            # If not a Git directory, pass preflight without changes
             return True, None, None
     except Exception as e:
-        return False, f"BLOCKED_GIT_SYNC: Errore durante la verifica del repository Git in '{p}': {e}", None
+        return False, f"BLOCKED_GIT_SYNC: Error verifying Git repository in '{p}': {e}", None
 
-    # 1. Registra commit iniziale
+    # 1. Record initial commit
     initial_commit = None
     try:
         res_head = subprocess.run(
@@ -858,7 +858,7 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
     except Exception:
         pass
 
-    # 2. Verifica che il repository sia rigorosamente pulito (nessun file untracked / uncommitted)
+    # 2. Verify that the repository is strictly clean (no untracked / uncommitted files)
     try:
         res_stat = subprocess.run(
             ["git", "status", "--porcelain"],
@@ -868,28 +868,28 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
             timeout=10
         )
         if res_stat.returncode != 0:
-            return False, f"BLOCKED_GIT_SYNC: Impossibile verificare lo stato Git in '{p}': {res_stat.stderr.strip()}", initial_commit
+            return False, f"BLOCKED_GIT_SYNC: Unable to check Git status in '{p}': {res_stat.stderr.strip()}", initial_commit
         dirty_lines = [l for l in res_stat.stdout.splitlines() if l.strip()]
         if dirty_lines:
             preview = "\n".join(f"  - {line}" for line in dirty_lines[:10])
             if len(dirty_lines) > 10:
-                preview += f"\n  ... e altri {len(dirty_lines) - 10} file"
+                preview += f"\n  ... and {len(dirty_lines) - 10} more files"
             err_msg = (
-                "BLOCKED_GIT_SYNC: Repository locale non pulito (modifiche non committate o file untracked presenti).\n"
-                f"Modifiche rilevate:\n{preview}\n\n"
-                "Istruzioni per sbloccare:\n"
-                "1. Per preservare il tuo codice locale, esegui il commit delle modifiche:\n"
-                "   git add -A && git commit -m \"Salvataggio modifiche prima di Taktstock\"\n"
-                "   oppure salvale manualmente con: git stash\n"
-                "2. Rimuovi o committa eventuali file untracked indesiderati.\n"
-                "3. Rilancia il task di Taktstock.\n"
-                "(Taktstock non esegue reset, stash o clean automatici per proteggere il codice locale)."
+                "BLOCKED_GIT_SYNC: Local repository is not clean (uncommitted changes or untracked files present).\n"
+                f"Detected changes:\n{preview}\n\n"
+                "Instructions to unblock (Istruzioni per sbloccare):\n"
+                "1. To preserve your local code, commit your changes:\n"
+                "   git add -A && git commit -m \"Save changes before Taktstock\"\n"
+                "   or stash them manually with: git stash\n"
+                "2. Remove or commit any unwanted untracked files.\n"
+                "3. Re-launch the Taktstock task.\n"
+                "(Taktstock never executes automatic reset, stash, or clean to safeguard local code)."
             )
             return False, err_msg, initial_commit
     except Exception as e:
-        return False, f"BLOCKED_GIT_SYNC: Errore durante la verifica dello stato pulito di '{p}': {e}", initial_commit
+        return False, f"BLOCKED_GIT_SYNC: Error verifying clean state of '{p}': {e}", initial_commit
 
-    # 3. Controllo remotes
+    # 3. Check remotes
     remotes = []
     try:
         res_rem = subprocess.run(
@@ -905,7 +905,7 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
         pass
 
     if "origin" in remotes:
-        # 4. Esegui git fetch --prune origin
+        # 4. Run git fetch --prune origin
         try:
             res_fetch = subprocess.run(
                 ["git", "fetch", "--prune", "origin"],
@@ -916,18 +916,18 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
             )
             if res_fetch.returncode != 0:
                 err_msg = (
-                    f"BLOCKED_GIT_SYNC: Fallito 'git fetch --prune origin' su '{p}'.\n"
-                    f"Dettaglio errore: {res_fetch.stderr.strip()}\n\n"
-                    "Istruzioni per sbloccare:\n"
-                    "1. Verifica la connessione di rete e le credenziali di accesso al remote origin.\n"
-                    "2. Esegui manualmente nel repository: git fetch --prune origin\n"
-                    "3. Rilancia il task di Taktstock."
+                    f"BLOCKED_GIT_SYNC: Failed 'git fetch --prune origin' on '{p}'.\n"
+                    f"Error detail: {res_fetch.stderr.strip()}\n\n"
+                    "Instructions to unblock (Istruzioni per sbloccare):\n"
+                    "1. Check network connection and access credentials for remote origin.\n"
+                    "2. Run manually in the repository: git fetch --prune origin\n"
+                    "3. Re-launch the Taktstock task."
                 )
                 return False, err_msg, initial_commit
         except Exception as e:
-            return False, f"BLOCKED_GIT_SYNC: Errore durante 'git fetch --prune origin' in '{p}': {e}", initial_commit
+            return False, f"BLOCKED_GIT_SYNC: Error during 'git fetch --prune origin' in '{p}': {e}", initial_commit
 
-        # 5. Rileva ramo corrente o target
+        # 5. Detect current or target branch
         cur_branch = ""
         try:
             res_cb = subprocess.run(
@@ -944,7 +944,7 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
 
         target_branch = cur_branch if (cur_branch and cur_branch != "HEAD") else (branch or "main")
 
-        # Verifica se il remote branch origin/<target_branch> esiste
+        # Check if remote branch origin/<target_branch> exists
         has_remote_branch = False
         try:
             res_rb = subprocess.run(
@@ -975,30 +975,30 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
 
                     if ahead > 0 and behind > 0:
                         err_msg = (
-                            f"BLOCKED_GIT_SYNC: Il ramo locale '{target_branch}' è divergente rispetto a origin/{target_branch} "
-                            f"({ahead} commit ahead, {behind} commit behind).\n"
-                            "Fast-forward non possibile senza riconciliazione.\n\n"
-                            "Istruzioni per sbloccare:\n"
-                            f"1. Esegui il rebase o merge manuale del ramo remoto:\n"
+                            f"BLOCKED_GIT_SYNC: Local branch '{target_branch}' has diverged from origin/{target_branch} (ramo divergente) "
+                            f"({ahead} commits ahead, {behind} commits behind).\n"
+                            "Fast-forward is not possible without reconciliation.\n\n"
+                            "Instructions to unblock (Istruzioni per sbloccare):\n"
+                            f"1. Perform manual rebase or merge of the remote branch:\n"
                             f"   git pull --rebase origin {target_branch}\n"
-                            "2. Risolvi eventuali conflitti e verifica i commit.\n"
-                            "3. Rilancia il task di Taktstock."
+                            "2. Resolve conflicts and verify commits.\n"
+                            "3. Re-launch the Taktstock task."
                         )
                         return False, err_msg, initial_commit
 
                     if ahead > 0 and behind == 0:
                         err_msg = (
-                            f"BLOCKED_GIT_SYNC: Il ramo locale '{target_branch}' ha {ahead} commit non inviati a origin (ahead).\n\n"
-                            "Istruzioni per sbloccare:\n"
-                            f"1. Invia i commit locali al repository remoto:\n"
+                            f"BLOCKED_GIT_SYNC: Local branch '{target_branch}' has {ahead} commits ahead of origin (ahead).\n\n"
+                            "Instructions to unblock:\n"
+                            f"1. Push local commits to the remote repository:\n"
                             f"   git push origin {target_branch}\n"
-                            "   oppure allinea il branch prima di avviare il task.\n"
-                            "2. Rilancia il task di Taktstock."
+                            "   or align the branch before starting the task.\n"
+                            "2. Re-launch the Taktstock task."
                         )
                         return False, err_msg, initial_commit
 
                     if behind > 0 and ahead == 0:
-                        # Aggiorna esclusivamente con fast-forward
+                        # Update exclusively with fast-forward
                         res_pull = subprocess.run(
                             ["git", "pull", "--ff-only", "origin", target_branch],
                             cwd=str(p),
@@ -1008,15 +1008,15 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
                         )
                         if res_pull.returncode != 0:
                             err_msg = (
-                                f"BLOCKED_GIT_SYNC: Impossibile aggiornare '{target_branch}' con 'git pull --ff-only'.\n"
-                                f"Dettaglio errore: {res_pull.stderr.strip()}\n\n"
-                                "Istruzioni per sbloccare:\n"
-                                f"1. Esegui manualmente: git pull --ff-only origin {target_branch}\n"
-                                "2. Verifica che non vi siano discrepanze e rilancia il task di Taktstock."
+                                f"BLOCKED_GIT_SYNC: Unable to update '{target_branch}' with 'git pull --ff-only'.\n"
+                                f"Error detail: {res_pull.stderr.strip()}\n\n"
+                                "Instructions to unblock:\n"
+                                f"1. Run manually: git pull --ff-only origin {target_branch}\n"
+                                "2. Verify no discrepancies exist and re-launch the Taktstock task."
                             )
                             return False, err_msg, initial_commit
 
-                        # Rileva nuovo commit iniziale dopo pull ff-only
+                        # Detect new initial commit after pull ff-only
                         res_head2 = subprocess.run(
                             ["git", "rev-parse", "HEAD"],
                             cwd=str(p),
@@ -1027,7 +1027,7 @@ def check_git_preflight_sync(repo_path: Path, branch: Optional[str] = None) -> T
                         if res_head2.returncode == 0 and res_head2.stdout.strip():
                             initial_commit = res_head2.stdout.strip()
             except Exception as e:
-                return False, f"BLOCKED_GIT_SYNC: Errore durante verifica ahead/divergente in '{p}': {e}", initial_commit
+                return False, f"BLOCKED_GIT_SYNC: Error checking ahead/divergent state in '{p}': {e}", initial_commit
 
     return True, None, initial_commit
 
@@ -1323,12 +1323,12 @@ class MultiAgentRunner:
         return tasks
 
     def execute_mechanical_task(self, task: Dict[str, Any]) -> str:
-        """Esecuzione puramente deterministica (zero chiamate LLM) per task meccanici allowlistati."""
+        """Purely deterministic execution (zero LLM calls) for allowlisted mechanical tasks."""
         task_id = str(task.get("id", "T?")).upper()
         desc = task.get("d", "")
         action = getattr(self, "mechanical_action", None) or task.get("action") or "sync-n8n-mirror"
-        logger.info(f"[MECHANICAL_EXEC] Esecuzione deterministica subtask {task_id} (Azione: '{action}'): {desc}")
-        self.notify("task_started", f"Avvio subtask meccanico {task_id}: {desc}", {"task": task})
+        logger.info(f"[MECHANICAL_EXEC] Deterministic execution of subtask {task_id} (Action: '{action}'): {desc}")
+        self.notify("task_started", f"Starting mechanical subtask {task_id}: {desc}", {"task": task})
 
         ws = Path(self.workspace)
 
@@ -1528,19 +1528,19 @@ class MultiAgentRunner:
                         "status": "SKIPPED",
                         "action": action,
                         "phase": "validation",
-                        "error": "Subtask T4 saltato: nessun export disponibile da validare.",
+                        "error": "Subtask T4 skipped: no export available to validate.",
                         "agent_calls": 0,
                         "tokens_used": 0
                     }, ensure_ascii=False)
 
                 target_path = ws / "MiniApp_Master_API.json"
                 if not target_path.exists():
-                    return json.dumps({"status": "ERROR", "error": f"File mirror {target_path} non trovato."}, ensure_ascii=False)
+                    return json.dumps({"status": "ERROR", "error": f"Mirror file {target_path} not found."}, ensure_ascii=False)
 
                 try:
                     content = json.loads(target_path.read_text(encoding="utf-8"))
                     if not isinstance(content, dict) or "nodes" not in content:
-                        raise ValueError("JSON non valido: chiave 'nodes' assente o non strutturata.")
+                        raise ValueError("Invalid JSON: 'nodes' key missing or unstructured.")
                     res = {
                         "status": "SUCCESS",
                         "action": action,
@@ -1724,14 +1724,14 @@ class MultiAgentRunner:
             return f"ERROR: {str(e)}"
 
     def call_codex_profile(self, profile: str, prompt: str, reasoning_effort: Optional[str] = None, sandbox_mode: Optional[str] = None, phase: str = "orchestrator_call", subtask_id: Optional[str] = None) -> str:
-        """Invoca Codex tramite Sidecar Socket host (se abilitato) oppure gestione Hot-Switching locale."""
+        """Invokes Codex via host Socket Sidecar (if enabled) or local hot-switching."""
         if self.mock_mode:
-            logger.info(f"[MOCK] Codex profile '{profile}' chiamato")
+            logger.info(f"[MOCK] Codex profile '{profile}' called")
             if hasattr(self.tokens_used, "record_call"):
                 self.tokens_used.record_call(profile, phase=phase, prompt_len=len(prompt), output_len=50)
             return json.dumps({"ok": True, "notes": "Mock execution ok", "verdict": "pass", "issues": [], "fix_prompt": ""})
 
-        # Controllo budget guard prima di invocare
+        # Check budget guard before invoking
         allowed, budget_err = self.check_budget_before_call(profile, phase=phase, prompt_len=len(prompt))
         if not allowed:
             logger.warning(f"[BUDGET_BLOCKED] Invocazione {profile} bloccata da budget guard: {budget_err}")
@@ -1874,11 +1874,11 @@ class MultiAgentRunner:
 
         if hasattr(self.tokens_used, "release_reservation"):
             self.tokens_used.release_reservation(res_id)
-        logger.error("Tutti gli account Codex disponibili hanno fallito o sono in rate limit.")
+        logger.error("All available Codex accounts have failed or are rate limited.")
         return raw_out
 
     def call_director(self, prompt: str, high_effort: bool = False, phase: str = "planning") -> Dict[str, Any]:
-        """Chiama il Direttore (GPT-5.6 Terra o Sol in base al preset o escalation)."""
+        """Calls the Director (GPT-5.6 Terra or Sol based on preset or escalation)."""
         if self.mock_mode:
             p_lower = prompt.lower()
             if hasattr(self.tokens_used, "record_call"):
@@ -1919,14 +1919,14 @@ class MultiAgentRunner:
         res = self.call_codex_profile(profile, full_prompt, reasoning_effort=effort, phase=phase)
         data = extract_json(res)
         if data.get("escalate") and not high_effort and self.preset_config.get("allow_escalation", True) and profile != "sol":
-            logger.info("Escalation a Sol richiesta dal Direttore.")
+            logger.info("Escalation to Sol requested by Director.")
             return self.call_director(prompt, high_effort=True, phase=phase)
         return data
 
     def call_executor_agy(self, prompt: str, subtask_id: Optional[str] = None) -> str:
-        """Esegue un task AGY tramite AgentGateway (Host Sidecar)."""
+        """Executes an AGY task via AgentGateway (Host Sidecar)."""
         if self.mock_mode:
-            logger.info("[MOCK] Esecuzione agy simulata")
+            logger.info("[MOCK] Simulated agy execution")
             if hasattr(self.tokens_used, "record_call"):
                 self.tokens_used.record_call("agy", phase="execution", prompt_len=len(prompt), output_len=100, reported_tokens=150)
             else:
@@ -1934,23 +1934,23 @@ class MultiAgentRunner:
                 self.tokens_used["total"] += 150
             return json.dumps({"status": "SUCCESS", "response": "Mock agy task executed successfully."})
 
-        # 1. strict_token_budget=True: se il provider non supporta un cap nativo di token (come AGY CLI), non avviare AGY
+        # 1. strict_token_budget=True: if provider cannot enforce a native token cap (like AGY CLI), do not launch AGY
         if getattr(self, "strict_token_budget", False):
-            reason = "cap token non imponibile dal provider"
+            reason = "token cap cannot be enforced by provider (cap token non imponibile dal provider)"
             logger.warning(f"[BUDGET_BLOCKED] BLOCKED_BUDGET: {reason}")
             raise BudgetExceededError(f"BLOCKED_BUDGET: {reason}")
 
-        # 2. Controllo budget guard preventivo prima dell'esecuzione
+        # 2. Preventive budget guard check before execution
         allowed, budget_err = self.check_budget_before_call("agy", phase="execution", prompt_len=len(prompt))
         if not allowed:
-            logger.warning(f"[BUDGET_BLOCKED] Chiamata ad AGY bloccata da budget guard: {budget_err}")
+            logger.warning(f"[BUDGET_BLOCKED] AGY call blocked by budget guard: {budget_err}")
             raise BudgetExceededError(budget_err)
 
         is_compact = getattr(self, "read_only", False) or is_audit_task(getattr(self, "task_description", ""))
         expected_out = get_role_max_output_tokens("agy", "execution", is_compact=is_compact)
         res_id = self.tokens_used.reserve("agy", (len(prompt) // 4) + expected_out) if hasattr(self.tokens_used, "reserve") else None
 
-        logger.info("Esecuzione task con agy via AgentGateway (Host Sidecar)...")
+        logger.info("Executing task with agy via AgentGateway (Host Sidecar)...")
         task_prompt = f"{self.design_context}\n\n{prompt}" if self.design_context else prompt
         full_prompt = f"{AGY_EXECUTOR_SYSTEM_PROMPT}\n\nTASK ASSIGNED BY SOL:\n{task_prompt}"
 
@@ -2308,12 +2308,12 @@ class MultiAgentRunner:
         if catalog and all_ids:
             for wf_id in all_ids:
                 if wf_id not in catalog:
-                    return False, f"Il workflow target ID '{wf_id}' non è stato trovato nel catalogo live n8n ({len(catalog)} workflow registrati)."
+                    return False, f"Target workflow ID '{wf_id}' not found in live n8n catalog (non è stato trovato nel catalogo live) ({len(catalog)} workflows registered)."
 
         return True, None
 
     def check_subtask_prerequisites(self, task: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-        """Preflight obbligatorio prima dell'esecuzione del singolo subtask."""
+        """Mandatory preflight check before executing a single subtask."""
         if self.mock_mode:
             return True, None
 
@@ -2321,14 +2321,14 @@ class MultiAgentRunner:
         agent = task.get("a", "agy")
         target = str(task.get("target", "")).strip().lower()
 
-        # Task meccanici/deterministici: nessun prerequisito socket o account LLM
+        # Deterministic/mechanical tasks: no socket or LLM account prerequisites
         if agent == "local_mechanical" or getattr(self, "current_is_mechanical", False) or self.preset_name == "mechanical":
             return True, None
 
         is_n8n_task = self.task_targets_n8n(task) or target in {"n8n", "n8n_mcp", "n8n-mcp"} or agent == "luna"
 
         if is_n8n_task:
-            # 1. Se il sidecar Codex host è attivo, verifica socket readiness
+            # 1. If host Codex sidecar is active, check socket readiness
             if (os.environ.get("TAKTSTOCK_HOST_CODEX_SIDECAR") or os.environ.get("UFFICIO_HOST_CODEX_SIDECAR", "")).strip().lower() in {"1", "true", "yes", "on"}:
                 try:
                     try:
@@ -2337,26 +2337,26 @@ class MultiAgentRunner:
                         from server.infrastructure.host_codex_client import HostCodexClient
                     codex_client = HostCodexClient()
                     if not codex_client.check_ready():
-                        return False, f"Subtask [{task_id}] richiede l'agente 'luna', ma il sidecar Host Codex non è pronto o non è raggiungibile."
+                        return False, f"Subtask [{task_id}] requires agent 'luna', but host Codex sidecar is not ready or unreachable (sidecar Host Codex non è pronto o non è raggiungibile)."
                 except Exception as e:
-                    return False, f"Subtask [{task_id}] richiede l'agente 'luna', ma il sidecar Host Codex non è raggiungibile: {e}"
+                    return False, f"Subtask [{task_id}] requires agent 'luna', but host Codex sidecar is unreachable: {e}"
 
-            # 2. Verifica disponibilità account Luna / Cooldown
+            # 2. Check Luna account availability / cooldown
             luna_account = self.account_manager.get_account_for_role("luna")
             if not luna_account:
                 return False, (
-                    f"Subtask [{task_id}] richiede l'agente 'luna' per operazioni live n8n, "
-                    "ma nessun account Luna è disponibile (in cooldown o non configurato). "
-                    "Fallback a DeepSeek Flash disabilitato per task strettamente dipendenti da MCP."
+                    f"Subtask [{task_id}] requires agent 'luna' for live n8n operations, "
+                    "but no Luna account is available (in cooldown or unconfigured). "
+                    "Fallback to DeepSeek Flash disabled for MCP-dependent tasks."
                 )
 
-            # 3. Verifica disponibilità MCP del workflow target
+            # 3. Check MCP availability for target workflow
             mcp_ok, mcp_reason = self.check_workflow_mcp_availability(task)
             if not mcp_ok:
-                return False, f"Subtask [{task_id}] bloccato: {mcp_reason}"
+                return False, f"Subtask [{task_id}] blocked: {mcp_reason}"
 
         elif agent in ["agy", "antigravity"]:
-            # Verifica che il sidecar AGY sia raggiungibile se abilitato
+            # Verify that AGY sidecar is reachable if enabled
             if (os.environ.get("TAKTSTOCK_HOST_AGY_SIDECAR") or os.environ.get("UFFICIO_HOST_AGY_SIDECAR", "")).strip().lower() in {"1", "true", "yes", "on"}:
                 try:
                     try:
@@ -2365,9 +2365,9 @@ class MultiAgentRunner:
                         from server.infrastructure.host_agy_client import HostAgyClient
                     client = HostAgyClient()
                     if not client.check_ready():
-                        return False, f"Subtask [{task_id}] richiede l'agente 'agy', ma il sidecar Host AGY non è pronto o non è raggiungibile."
+                        return False, f"Subtask [{task_id}] requires agent 'agy', but host AGY sidecar is not ready or unreachable (sidecar Host AGY non è pronto o non è raggiungibile)."
                 except Exception as e:
-                    return False, f"Subtask [{task_id}] richiede l'agente 'agy', ma il sidecar Host AGY non è pronto o non è raggiungibile: {e}"
+                    return False, f"Subtask [{task_id}] requires agent 'agy', but host AGY sidecar is not ready or unreachable (sidecar Host AGY non è pronto o non è raggiungibile): {e}"
 
         return True, None
 
@@ -2663,32 +2663,32 @@ Verifica l'output. Rispondi SOLO in JSON:
 
                     if check_res.get("ok", True):
                         check_passed = True
-                        logger.info(f"Subtask [{task_id}] ha superato il check al tentativo {attempt}")
+                        logger.info(f"Subtask [{task_id}] passed check on attempt {attempt}")
                     else:
-                        notes = check_res.get("notes", "Modifica richiesta dal Direttore.")
-                        logger.warning(f"Check fallito per [{task_id}] (tentativo {attempt}/{self.max_fix_attempts}): {notes}")
+                        notes = check_res.get("notes", "Modification requested by Director.")
+                        logger.warning(f"Check failed for [{task_id}] (attempt {attempt}/{self.max_fix_attempts}): {notes}")
                         if attempt < self.max_fix_attempts:
-                            fix_prompt = f"Correggi questo errore nel task '{desc}':\nNote: {notes}\nOutput precedente: {output[:1500]}"
+                            fix_prompt = f"Fix this error in task '{desc}':\nNotes: {notes}\nPrevious output: {output[:1500]}"
                             try:
                                 output = self.retry_with_primary_executor(agent, fix_prompt, subtask_id=task_id, context=desc)
                             except BudgetExceededError as be:
-                                logger.warning(f"Fixer saltato per budget superato: {be}")
+                                logger.warning(f"Fixer skipped due to exceeded budget: {be}")
                                 break
 
-        # 3. Double Review se richiesta e attiva nel preset (disabilitata per BLOCKED)
+        # 3. Double Review if requested and active in preset (disabled for BLOCKED)
         active_reviewers = self.preset_config.get("reviewers", [])
         if review_required and active_reviewers and "BLOCKED_" not in output:
-            # Filtra i revisori che hanno budget disponibile
+            # Filter reviewers that have available budget
             filtered_reviewers = []
             for rev in active_reviewers:
                 allowed_rev, _ = self.check_budget_before_call(rev, phase="review")
                 if allowed_rev:
                     filtered_reviewers.append(rev)
                 else:
-                    logger.info(f"Reviewer '{rev}' saltato per preservare il budget.")
+                    logger.info(f"Reviewer '{rev}' skipped to preserve budget.")
 
             if filtered_reviewers:
-                logger.info(f"Avvio Review per [{task_id}] con revisori: {filtered_reviewers}")
+                logger.info(f"Starting Review for [{task_id}] with reviewers: {filtered_reviewers}")
                 review_approved = False
                 rev_attempt = 0
 
@@ -2698,7 +2698,7 @@ Verifica l'output. Rispondi SOLO in JSON:
                     collected_fixes = []
 
                     if "ds-pro" in filtered_reviewers:
-                        rev2_prompt = f"""Revisione architetturale e edge-case per il task: {desc}
+                        rev2_prompt = f"""Architectural and edge-case review for task: {desc}
 Output: {output[:2000]}
 Output JSON: {{"verdict": "pass|fix", "issues": ["..."], "fix_prompt": "..."}}"""
                         try:
@@ -2708,16 +2708,16 @@ Output JSON: {{"verdict": "pass|fix", "issues": ["..."], "fix_prompt": "..."}}""
                                 if rev2.get("fix_prompt"):
                                     collected_fixes.append(rev2.get("fix_prompt"))
                         except BudgetExceededError as be:
-                            logger.warning(f"Review DeepSeek Pro saltata per budget superato: {be}")
+                            logger.warning(f"DeepSeek Pro review skipped due to exceeded budget: {be}")
 
                     if not collected_issues and not collected_fixes:
                         review_approved = True
-                        logger.info(f"Subtask [{task_id}] approvato da tutti i revisori (ciclo {rev_attempt})")
+                        logger.info(f"Subtask [{task_id}] approved by all reviewers (attempt {rev_attempt})")
                         break
 
-                    logger.warning(f"Review [{task_id}] ciclo {rev_attempt}/{self.max_fix_attempts} richiede modifiche: {collected_issues}")
+                    logger.warning(f"Review [{task_id}] attempt {rev_attempt}/{self.max_fix_attempts} requests changes: {collected_issues}")
                     if rev_attempt < self.max_fix_attempts:
-                        combined_fix = f"Risolvi i problemi rilevati dai Reviewer nel progetto:\nIssues: {collected_issues}\nFix suggeriti: {' '.join(collected_fixes)}"
+                        combined_fix = f"Fix issues reported by Reviewers in the project:\nIssues: {collected_issues}\nSuggested fixes: {' '.join(collected_fixes)}"
                         try:
                             output = self.retry_with_primary_executor(agent, combined_fix, subtask_id=task_id, context=desc)
                         except BudgetExceededError:
@@ -2726,34 +2726,34 @@ Output JSON: {{"verdict": "pass|fix", "issues": ["..."], "fix_prompt": "..."}}""
         return output
 
     def validate(self, tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Fase 4: Validazione finale del Direttore."""
-        logger.info("Inizio Fase 4: Validazione Finale...")
+        """Phase 4: Final validation by Director."""
+        logger.info("Starting Phase 4: Final Validation...")
         allowed, _ = self.check_budget_before_call(self.preset_config.get("director", "sol"), phase="validation")
         if not allowed:
-            logger.info("Validazione finale Sol saltata per preservare il limite di budget; validazione completata con successo.")
-            return {"phase": "validate", "status": "done", "summary": "Validazione automatica (budget preservato)", "blockers": []}
+            logger.info("Sol final validation skipped to preserve budget limit; validation completed successfully.")
+            return {"phase": "validate", "status": "done", "summary": "Automatic validation (budget preserved)", "blockers": []}
 
-        prompt = f"""Tutti i subtask sono stati eseguiti: {json.dumps(tasks, ensure_ascii=False)}
-Valuta lo stato finale del progetto. Rispondi SOLO in JSON:
-{{"phase": "validate", "status": "done|retry", "summary": "sintesi finale", "blockers": []}}"""
+        prompt = f"""All subtasks have been executed: {json.dumps(tasks, ensure_ascii=False)}
+Evaluate the final project state. Respond ONLY in JSON:
+{{"phase": "validate", "status": "done|retry", "summary": "final synthesis", "blockers": []}}"""
         try:
             return self.call_director(prompt, phase="validation")
         except BudgetExceededError:
-            return {"phase": "validate", "status": "done", "summary": "Validazione automatica (budget superato per Sol)", "blockers": []}
+            return {"phase": "validate", "status": "done", "summary": "Automatic validation (budget exceeded for Sol)", "blockers": []}
 
     def save_run_metrics(self, summary: Dict[str, Any]):
-        """Persiste le metriche e il riassunto dell'esecuzione nel log JSONL per analytics."""
+        """Persists metrics and execution summary to JSONL log for analytics."""
         try:
             self.state_dir.mkdir(parents=True, exist_ok=True)
             history_file = self.state_dir / "runs_history.jsonl"
             with open(history_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(summary, ensure_ascii=False) + "\n")
         except Exception as e:
-            logger.debug(f"Impossibile salvare metriche di run in {self.state_dir}: {e}")
+            logger.debug(f"Unable to save run metrics in {self.state_dir}: {e}")
 
     @staticmethod
     def _safe_telegram_text(value: Any, max_chars: int = 400) -> str:
-        """Sanitizza e tronca in sicurezza un testo per le notifiche Telegram."""
+        """Safely sanitizes and truncates text for Telegram notifications."""
         if value is None:
             return ""
         text = str(value).strip()

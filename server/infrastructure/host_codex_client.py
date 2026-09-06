@@ -2,17 +2,17 @@
 """
 Host Codex Socket Client (Hardened Production IPC)
 --------------------------------------------------
-Client per la comunicazione IPC su Unix Domain Socket con il demone
-sidecar host (taktstock-codex.service).
+Client for Unix Domain Socket IPC communication with the host
+sidecar daemon (taktstock-codex.service).
 
-Misure di Sicurezza Tassative:
-1. Lettura del segreto TAKTSTOCK_SIDECAR_TOKEN_FILE da file protetto (read-only):
-   Se il file è assente, vuoto o con token < 32 caratteri, fail-closed immediato
-   senza aprire alcuna connessione socket.
-2. Mai loggare il token o il contenuto del file.
-3. Limite massimo sulla risposta socket ricevuta (MAX_RESPONSE_BYTES = 512 KB)
-   per prevenire saturazione di memoria nel client.
-4. Nessun fallback a comandi CLI locali o account nel container in caso di errore.
+Mandatory Security Measures:
+1. Reads TAKTSTOCK_SIDECAR_TOKEN_FILE secret from protected file (read-only):
+   If file is missing, empty, or token < 32 characters, fail-closed immediately
+   without opening any socket connection.
+2. Never log token or file contents.
+3. Maximum socket response limit (MAX_RESPONSE_BYTES = 512 KB)
+   to prevent memory exhaustion in client.
+4. No fallback to local CLI commands or container accounts on error.
 """
 
 import os
@@ -35,23 +35,23 @@ DEFAULT_TOKEN_FILE_PATH = Path(
     os.environ.get("UFFICIO_SIDECAR_TOKEN_FILE") or
     ("/run/secrets/taktstock_sidecar_token" if Path("/run/secrets/taktstock_sidecar_token").exists() else "/run/secrets/ufficio_sidecar_token")
 )
-DEFAULT_TIMEOUT_SECONDS = 900     # 15 minuti
-MAX_RESPONSE_BYTES = 512 * 1024   # 512 KB max payload in ricezione
-MIN_TOKEN_LENGTH = 32             # Lunghezza minima token
+DEFAULT_TIMEOUT_SECONDS = 900     # 15 minutes
+MAX_RESPONSE_BYTES = 512 * 1024   # 512 KB max payload in reception
+MIN_TOKEN_LENGTH = 32             # Minimum token length
 
 
 class CodexSidecarError(RuntimeError):
-    """Eccezione sollevata quando il sidecar host restituisce un errore."""
+    """Exception raised when host sidecar returns an error."""
     pass
 
 
 class CodexSidecarBusyError(CodexSidecarError):
-    """Eccezione sollevata quando il runner host è occupato con un altro job."""
+    """Exception raised when host runner is busy with another job."""
     pass
 
 
 def load_client_sidecar_token(explicit_token: Optional[str] = None, token_file: Optional[Path] = None) -> str:
-    """Carica e valida il token da file segreto o argomento esplicito (File-Only, nessun fallback env)."""
+    """Loads and validates token from secret file or explicit argument (File-Only, no env fallback)."""
     if explicit_token and len(explicit_token.strip()) >= MIN_TOKEN_LENGTH:
         return explicit_token.strip()
 
@@ -65,8 +65,8 @@ def load_client_sidecar_token(explicit_token: Optional[str] = None, token_file: 
             pass
 
     raise CodexSidecarError(
-        "Autenticazione sidecar fallita: file segreto TAKTSTOCK_SIDECAR_TOKEN_FILE non trovato, illeggibile o token non valido (minimo 32 caratteri). "
-        "Configurazione a fail-closed: nessuna connessione socket tentata."
+        "Sidecar authentication failed (Autenticazione sidecar fallita): secret file TAKTSTOCK_SIDECAR_TOKEN_FILE not found, unreadable, or invalid token (minimum 32 characters). "
+        "fail-closed configuration: no socket connection attempted."
     )
 
 
@@ -84,14 +84,14 @@ class HostCodexClient:
         self.auth_token = auth_token
 
     def _get_valid_token(self) -> str:
-        """Risolve il token valido o solleva CodexSidecarError (fail closed)."""
+        """Resolves valid token or raises CodexSidecarError (fail-closed)."""
         return load_client_sidecar_token(self.auth_token, self.token_file)
 
     def check_ready(self, timeout: float = 2.0) -> bool:
         """
-        Verifica se il demone sidecar host Codex è attivo e raggiungibile via socket Unix.
-        Invia un messaggio di readiness {'auth_token': token, 'action': 'ready'}
-        e valida la risposta.
+        Checks whether the host Codex sidecar daemon is active and reachable via Unix socket.
+        Sends a readiness message {'auth_token': token, 'action': 'ready'}
+        and validates response.
         """
         try:
             token = self._get_valid_token()
@@ -130,14 +130,14 @@ class HostCodexClient:
         sandbox: str = "read-only",
         reasoning_effort: Optional[str] = None
     ) -> str:
-        """Invia una richiesta di esecuzione al demone sidecar host via Unix socket."""
-        # 1. Validazione token all'origine (Fail-Closed prima di connettere il socket)
+        """Sends an execution request to the host sidecar daemon via Unix socket."""
+        # 1. Token validation at origin (Fail-Closed before connecting socket)
         token = self._get_valid_token()
 
         if not self.socket_path.exists():
             raise CodexSidecarError(
-                f"Socket del sidecar host non trovato in {self.socket_path}. "
-                "Verificare che il servizio host taktstock-codex sia attivo."
+                f"Host sidecar socket not found at {self.socket_path}. "
+                "Verify that taktstock-codex service is active on the host."
             )
 
         payload: Dict[str, Any] = {
@@ -147,7 +147,7 @@ class HostCodexClient:
             "prompt": prompt,
             "sandbox": sandbox,
         }
-        # Regola di business: Luna non deve ricevere override di reasoning effort
+        # Business rule: Luna must not receive reasoning effort override
         if profile in ["sol", "director"]:
             payload["reasoning_effort"] = reasoning_effort or "low"
         elif reasoning_effort:
@@ -170,24 +170,24 @@ class HostCodexClient:
                     sock.close()
                     sock = None
                     raise CodexSidecarError(
-                        f"Risposta del sidecar host supera la dimensione massima consentita ({MAX_RESPONSE_BYTES} byte)."
+                        f"Host sidecar response exceeds maximum allowed size (dimensione massima consentita: {MAX_RESPONSE_BYTES} byte)."
                     )
             sock.close()
             sock = None
 
             if not raw_data:
-                raise CodexSidecarError("Risposta vuota ricevuta dal sidecar host.")
+                raise CodexSidecarError("Empty response received from host sidecar.")
 
             resp = json.loads(raw_data.decode("utf-8", errors="ignore"))
 
         except socket.timeout:
-            raise CodexSidecarError(f"Timeout ({self.timeout}s) durante la comunicazione con il sidecar host.")
+            raise CodexSidecarError(f"Timeout ({self.timeout}s) while communicating with host sidecar.")
         except json.JSONDecodeError as e:
-            raise CodexSidecarError(f"Risposta non valida (JSON malformato) dal sidecar host: {e}")
+            raise CodexSidecarError(f"Invalid response (malformed JSON) from host sidecar: {e}")
         except Exception as e:
             if isinstance(e, CodexSidecarError):
                 raise
-            raise CodexSidecarError(f"Errore connessione socket sidecar host ({self.socket_path}): {e}")
+            raise CodexSidecarError(f"Host sidecar socket connection error ({self.socket_path}): {e}")
         finally:
             if sock:
                 try:
@@ -199,8 +199,8 @@ class HostCodexClient:
         if status == "SUCCESS":
             return resp.get("stdout", "")
         elif status == "BUSY":
-            err_msg = resp.get("error", "Il runner host è attualmente occupato con un altro job. Riprova più tardi.")
+            err_msg = resp.get("error", "The host runner is currently busy (occupato) with another job. Please retry later.")
             raise CodexSidecarBusyError(err_msg)
         else:
-            err_msg = resp.get("error") or resp.get("stderr") or "Errore non specificato dal sidecar host."
-            raise CodexSidecarError(f"Esecuzione Codex fallita su host: {err_msg}")
+            err_msg = resp.get("error") or resp.get("stderr") or "Unspecified error from host sidecar."
+            raise CodexSidecarError(f"Codex execution failed on host: {err_msg}")
